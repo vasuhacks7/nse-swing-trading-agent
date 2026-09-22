@@ -50,19 +50,11 @@ You must respond with valid JSON only:
     "confidence": 0.7
 }"""
 
-# Bedrock model ID mapping
-BEDROCK_MODELS = {
-    "claude-sonnet-5": "anthropic.claude-sonnet-5",
-    "claude-opus-5": "anthropic.claude-opus-5",
-    "claude-haiku-4-5": "anthropic.claude-haiku-4-5",
-    "claude-sonnet-4-20250514": "anthropic.claude-sonnet-4-20250514-v1:0",
-}
-
-
 def _resolve_bedrock_model(model: str) -> str:
+    """Convert any Claude model name to Bedrock format (anthropic.xxx)."""
     if model.startswith("anthropic."):
         return model
-    return BEDROCK_MODELS.get(model, f"anthropic.{model}")
+    return f"anthropic.{model}"
 
 
 def _create_client():

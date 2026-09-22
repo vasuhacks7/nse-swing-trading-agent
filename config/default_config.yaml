@@ -94,5 +94,5 @@ improvement:
 
 reflection:
   enabled: true
-  model: claude-sonnet-5
+  model: claude-haiku-4-5
   review_after_trades: 10
