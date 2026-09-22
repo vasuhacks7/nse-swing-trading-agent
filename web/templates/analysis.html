@@ -362,29 +362,57 @@
     {% endif %}
 </div>
 
-<!-- TradingView Widget Script -->
-<script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-<script type="text/javascript">
-    new TradingView.widget({
-        "autosize": true,
-        "symbol": "NSE:{{ symbol }}",
-        "interval": "{{ interval or 'D' }}",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "style": "1",
-        "locale": "en",
-        "toolbar_bg": "#111928",
-        "enable_publishing": false,
-        "hide_side_toolbar": false,
-        "allow_symbol_change": true,
-        "details": true,
-        "hotlist": false,
-        "calendar": false,
-        "studies": ["MAExp@tv-basicstudies", "RSI@tv-basicstudies", "MACD@tv-basicstudies"],
-        "container_id": "tradingview_chart",
-        "backgroundColor": "#111928",
-        "gridColor": "#1e293b",
+<!-- Lightweight Charts -->
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function() {
+    var chartData = {{ chart_data | tojson }};
+    if (!chartData || !chartData.length) return;
+
+    var container = document.getElementById('tradingview_chart');
+    var chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 550,
+        layout: { background: { color: '#111928' }, textColor: '#9ca3af' },
+        grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        timeScale: { borderColor: '#2d3748', timeVisible: false },
+        rightPriceScale: { borderColor: '#2d3748' },
     });
+
+    var candleSeries = chart.addCandlestickSeries({
+        upColor: '#22c55e', downColor: '#ef4444',
+        borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+        wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+    });
+    candleSeries.setData(chartData);
+
+    var volumeData = chartData.map(function(d) {
+        return { time: d.time, value: d.volume, color: d.close >= d.open ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)' };
+    });
+    var volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+    volumeSeries.setData(volumeData);
+
+    {% if analysis and analysis.entry %}
+    candleSeries.createPriceLine({ price: {{ analysis.entry }}, color: '#3b82f6', lineWidth: 1, lineStyle: 2, title: 'Entry' });
+    candleSeries.createPriceLine({ price: {{ analysis.target }}, color: '#22c55e', lineWidth: 1, lineStyle: 2, title: 'Target' });
+    candleSeries.createPriceLine({ price: {{ analysis.stop_loss }}, color: '#ef4444', lineWidth: 1, lineStyle: 2, title: 'SL' });
+    {% endif %}
+
+    {% if analysis and analysis.fibonacci and analysis.fibonacci.levels %}
+    var fibColors = {'0.0%':'#ef4444','23.6%':'#f97316','38.2%':'#eab308','50.0%':'#a3e635','61.8%':'#22c55e','78.6%':'#06b6d4','100.0%':'#3b82f6'};
+    {% for level, price in analysis.fibonacci.levels.items() %}
+    candleSeries.createPriceLine({ price: {{ price }}, color: fibColors['{{ level }}'] || '#6b7280', lineWidth: 1, lineStyle: 1, title: 'Fib {{ level }}' });
+    {% endfor %}
+    {% endif %}
+
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', function() { chart.applyOptions({ width: container.clientWidth }); });
+})();
 </script>
 {% endif %}
 

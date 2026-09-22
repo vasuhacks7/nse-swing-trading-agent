@@ -138,12 +138,12 @@ async def analysis(request: Request, symbol: str = "", interval: str = "D"):
     symbol_clean = symbol.strip().upper().replace(".NS", "")
     try:
         result = paper_trader.analyze_and_trade(symbol_clean)
-        result.pop("ohlcv_json", None)
+        chart_data = result.pop("ohlcv_json", []) or []
         return _render(request, "analysis.html", {
             "symbol": symbol_clean,
             "analysis": result,
             "interval": interval,
-            "chart_data": [],
+            "chart_data": chart_data,
             "error": None,
         })
     except Exception as e:

@@ -916,6 +916,7 @@ def detect_confluence(df: pd.DataFrame, fundamentals: dict = None) -> dict:
 
 def full_analysis(df: pd.DataFrame, fundamentals: dict = None) -> dict:
     from data.preprocessor import Preprocessor
+    df = df.dropna(subset=["close"])
     df_ind = Preprocessor.add_indicators(df)
 
     analysis = detect_confluence(df_ind, fundamentals)
