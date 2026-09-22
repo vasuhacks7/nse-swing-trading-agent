@@ -4,12 +4,57 @@
 
 {% block content %}
 <div class="page-header">
-    <div class="page-title">Strategy Scoreboard</div>
-    <div class="page-subtitle">Self-improving strategy weights — promoting winners, demoting losers</div>
+    <div class="page-title">Unified Scoreboard</div>
+    <div class="page-subtitle">Self-improving performance tracker — daily alerts + scanner share one learning system</div>
 </div>
 
+<!-- ============= COMBINED OVERVIEW ============= -->
+{% set alert_trades = scores|sum(attribute='total_trades') if scores else 0 %}
+{% set scanner_picks = scanner.total_picks if scanner else 0 %}
+{% set total_all = alert_trades + scanner_picks %}
+<div class="metrics" style="margin-bottom: 30px;">
+    <div class="metric-card">
+        <div class="label">Total Tracked</div>
+        <div class="value">{{ total_all }}</div>
+        <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">{{ alert_trades }} alerts + {{ scanner_picks }} scans</div>
+    </div>
+    {% if scores %}
+    {% set best = scores|sort(attribute='win_rate', reverse=True)|first %}
+    <div class="metric-card">
+        <div class="label">Best Strategy</div>
+        <div class="value green" style="font-size: 16px; font-family: 'Inter', sans-serif;">{{ best.strategy|replace('_', ' ')|title }}</div>
+        <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">{{ "%.1f"|format(best.win_rate) }}% win rate</div>
+    </div>
+    {% endif %}
+    {% if scanner and scanner.win_rate is defined %}
+    <div class="metric-card">
+        <div class="label">Scanner Win Rate</div>
+        <div class="value {% if scanner.win_rate >= 0.5 %}green{% else %}red{% endif %}">{{ "%.1f"|format(scanner.win_rate * 100) }}%</div>
+        <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">{{ scanner.wins|default(0) }}W / {{ scanner.losses|default(0) }}L</div>
+    </div>
+    {% endif %}
+    {% if scanner and scanner.min_confluence is defined %}
+    <div class="metric-card">
+        <div class="label">Min Confluence</div>
+        <div class="value blue">{{ scanner.min_confluence }}/12</div>
+        <div style="color: var(--text-muted); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">auto-adjusted by learner</div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ============= TAB SWITCHER ============= -->
+<div style="display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid #1e293b;">
+    <button id="tabStrategies" onclick="showTab('strategies')" style="padding: 10px 20px; background: #3b82f6; color: #fff; border: none; border-radius: 8px 8px 0 0; font-weight: 700; font-size: 13px; cursor: pointer;">
+        Daily Alert Strategies ({{ scores|length if scores else 0 }})
+    </button>
+    <button id="tabScanner" onclick="showTab('scanner')" style="padding: 10px 20px; background: #1e293b; color: #9ca3af; border: none; border-radius: 8px 8px 0 0; font-weight: 700; font-size: 13px; cursor: pointer;">
+        Scanner Factors ({{ scanner.factor_scores|length if scanner and scanner.factor_scores else 0 }})
+    </button>
+</div>
+
+<!-- ============= DAILY ALERT STRATEGIES ============= -->
+<div id="panelStrategies">
 {% if scores %}
-<!-- Strategy Cards -->
 <div class="strategy-cards">
     {% for s in scores %}
     <div class="strategy-card">
@@ -49,33 +94,8 @@
     {% endfor %}
 </div>
 
-<!-- Summary Metrics -->
-<div class="metrics">
-    {% set best = scores|sort(attribute='win_rate', reverse=True)|first %}
-    {% set worst = scores|sort(attribute='win_rate')|first %}
-    <div class="metric-card">
-        <div class="label">Best Strategy</div>
-        <div class="value green" style="font-size: 16px; font-family: 'Inter', sans-serif;">{{ best.strategy|replace('_', ' ')|title }}</div>
-        <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">{{ "%.1f"|format(best.win_rate) }}% win rate</div>
-    </div>
-    <div class="metric-card">
-        <div class="label">Worst Strategy</div>
-        <div class="value red" style="font-size: 16px; font-family: 'Inter', sans-serif;">{{ worst.strategy|replace('_', ' ')|title }}</div>
-        <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px; font-family: 'JetBrains Mono', monospace;">{{ "%.1f"|format(worst.win_rate) }}% win rate</div>
-    </div>
-    <div class="metric-card">
-        <div class="label">Total Trades</div>
-        <div class="value">{{ scores|sum(attribute='total_trades') }}</div>
-    </div>
-    <div class="metric-card">
-        <div class="label">Active Strategies</div>
-        <div class="value blue">{{ scores|selectattr('weight', 'gt', 0.2)|list|length }} / {{ scores|length }}</div>
-    </div>
-</div>
-
-<!-- Full Table -->
-<div class="section">
-    <div class="section-title">Detailed Breakdown</div>
+<div class="section" style="margin-top: 20px;">
+    <div class="section-title">Strategy Detail</div>
     <div class="table-wrap">
         <table>
             <thead>
@@ -132,11 +152,143 @@
         </table>
     </div>
 </div>
+{% else %}
+<div class="empty-state">
+    <div class="icon">📊</div>
+    <p>No strategy scores yet. The strategies are scored after daily alerts are closed and the improvement cycle runs.</p>
+</div>
+{% endif %}
+</div>
+
+<!-- ============= SCANNER FACTORS ============= -->
+<div id="panelScanner" style="display: none;">
+{% if scanner and scanner.total_picks %}
+
+<!-- Scanner summary cards -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px;">
+    <div style="background: #1e293b; border-radius: 8px; padding: 14px;">
+        <div style="color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Total Picks</div>
+        <div style="color: #e2e8f0; font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 4px;">{{ scanner.total_picks }}</div>
+    </div>
+    <div style="background: #1e293b; border-radius: 8px; padding: 14px;">
+        <div style="color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Win Rate</div>
+        <div style="color: {% if scanner.win_rate >= 0.5 %}#22c55e{% else %}#ef4444{% endif %}; font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 4px;">{{ "%.1f"|format(scanner.win_rate * 100) }}%</div>
+    </div>
+    <div style="background: #1e293b; border-radius: 8px; padding: 14px;">
+        <div style="color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Avg Return</div>
+        <div style="color: {% if scanner.avg_pnl >= 0 %}#22c55e{% else %}#ef4444{% endif %}; font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 4px;">{{ "%+.1f"|format(scanner.avg_pnl) }}%</div>
+    </div>
+    <div style="background: #1e293b; border-radius: 8px; padding: 14px;">
+        <div style="color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Min Confluence</div>
+        <div style="color: #e2e8f0; font-size: 22px; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 4px;">{{ scanner.min_confluence }}/12</div>
+    </div>
+</div>
+
+<!-- Factor performance table -->
+{% if scanner.factor_scores %}
+<div class="section">
+    <div class="section-title">Factor Performance (Self-Learning Weights)</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Confluence Factor</th>
+                    <th>Picks</th>
+                    <th>Win Rate</th>
+                    <th>Avg Return</th>
+                    <th>Weight</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in scanner.factor_scores %}
+                <tr>
+                    <td><strong>{{ f.factor|replace('_', ' ')|title }}</strong></td>
+                    <td>{{ f.total_picks }}</td>
+                    <td>
+                        <span class="{% if f.win_rate >= 0.55 %}pnl-positive{% elif f.win_rate <= 0.4 %}pnl-negative{% endif %}" style="font-weight: 700;">
+                            {{ "%.0f"|format(f.win_rate * 100) }}%
+                        </span>
+                    </td>
+                    <td>
+                        <span class="{% if f.avg_return_pct >= 0 %}pnl-positive{% else %}pnl-negative{% endif %}" style="font-family: 'JetBrains Mono', monospace;">
+                            {{ "%+.1f"|format(f.avg_return_pct) }}%
+                        </span>
+                    </td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">{{ "%.2f"|format(f.weight) }}x</span>
+                            <div class="weight-bar" style="width: 80px;">
+                                <div class="fill" style="width: {{ (f.weight / 2.0 * 100)|int }}%"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        {% if f.weight > 1.0 %}
+                            <span style="color: #22c55e; font-weight: 700; font-size: 11px;">Promoted</span>
+                        {% elif f.weight < 1.0 %}
+                            <span style="color: #ef4444; font-weight: 700; font-size: 11px;">Demoted</span>
+                        {% else %}
+                            <span style="color: #9ca3af; font-weight: 600; font-size: 11px;">Neutral</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Signal breakdown -->
+{% if scanner.signal_stats %}
+<div class="section" style="margin-top: 20px;">
+    <div class="section-title">By Signal Type</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+        {% for sig, stats in scanner.signal_stats.items() %}
+        <div style="background: #1e293b; border-radius: 8px; padding: 14px;">
+            <div style="font-weight: 700; color: {% if sig == 'STRONG_BUY' %}#22c55e{% elif sig == 'BUY' %}#3b82f6{% else %}#eab308{% endif %}; font-size: 13px; margin-bottom: 8px;">{{ sig|replace('_', ' ') }}</div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #9ca3af;">
+                <span>{{ stats.total }} picks</span>
+                <span style="color: {% if stats.win_rate >= 0.5 %}#22c55e{% else %}#ef4444{% endif %}; font-weight: 700;">{{ "%.0f"|format(stats.win_rate * 100) }}% win</span>
+                <span style="color: {% if stats.avg_pnl >= 0 %}#22c55e{% else %}#ef4444{% endif %}; font-family: monospace;">{{ "%+.1f"|format(stats.avg_pnl) }}%</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% else %}
 <div class="empty-state">
-    <div class="icon">🏆</div>
-    <p>No strategy scores yet. The scoreboard updates automatically after trades are closed and the improvement cycle runs.</p>
+    <div class="icon">🔍</div>
+    <p>No scanner picks tracked yet. Run the <a href="/scanner" style="color: #3b82f6;">Stock Scanner</a> to scan NSE stocks, then picks will be tracked and scored here automatically.</p>
 </div>
 {% endif %}
+</div>
+
+<script>
+function showTab(tab) {
+    var stratBtn = document.getElementById('tabStrategies');
+    var scanBtn = document.getElementById('tabScanner');
+    var stratPanel = document.getElementById('panelStrategies');
+    var scanPanel = document.getElementById('panelScanner');
+
+    if (tab === 'strategies') {
+        stratBtn.style.background = '#3b82f6';
+        stratBtn.style.color = '#fff';
+        scanBtn.style.background = '#1e293b';
+        scanBtn.style.color = '#9ca3af';
+        stratPanel.style.display = 'block';
+        scanPanel.style.display = 'none';
+    } else {
+        scanBtn.style.background = '#3b82f6';
+        scanBtn.style.color = '#fff';
+        stratBtn.style.background = '#1e293b';
+        stratBtn.style.color = '#9ca3af';
+        scanPanel.style.display = 'block';
+        stratPanel.style.display = 'none';
+    }
+}
+</script>
 {% endblock %}

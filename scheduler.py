@@ -91,6 +91,17 @@ def job_scan_apoorv():
         logger.error(f"Apoorv scan failed: {e}", exc_info=True)
 
 
+def job_scanner_daily_scan():
+    logger.info("=== SCHEDULED: Daily full NSE scanner ===")
+    try:
+        results = scanner_learner.run_full_scan()
+        buy_count = sum(1 for r in results if r.get("signal") in ("STRONG_BUY", "BUY"))
+        watch_count = sum(1 for r in results if r.get("signal") == "WATCH")
+        logger.info(f"Daily scan complete: {len(results)} signals — {buy_count} BUY, {watch_count} WATCH")
+    except Exception as e:
+        logger.error(f"Daily scanner failed: {e}", exc_info=True)
+
+
 def job_scanner_track():
     logger.info("=== SCHEDULED: Track scanner picks ===")
     try:
@@ -110,9 +121,9 @@ def job_scanner_learn():
 
 
 def job_improvement():
-    logger.info("=== SCHEDULED: Self-improvement cycle ===")
+    logger.info("=== SCHEDULED: Unified self-improvement cycle (strategies + scanner) ===")
     try:
-        result = improvement_engine.run_improvement_cycle()
+        result = improvement_engine.run_full_improvement_cycle()
         logger.info(f"Improvement cycle complete: {result}")
     except Exception as e:
         logger.error(f"Improvement cycle failed: {e}", exc_info=True)
@@ -120,6 +131,14 @@ def job_improvement():
 
 def main():
     scheduler = BlockingScheduler(timezone="Asia/Kolkata")
+
+    # 8:30 AM IST — full NSE scanner (takes ~10 min, ready before market opens)
+    scheduler.add_job(
+        job_scanner_daily_scan,
+        CronTrigger(hour=8, minute=30, day_of_week="mon-fri"),
+        id="scanner_daily",
+        name="Daily full NSE scanner",
+    )
 
     # 9:20 AM IST — generate alerts just after market opens
     scheduler.add_job(

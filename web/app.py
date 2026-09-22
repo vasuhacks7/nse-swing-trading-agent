@@ -169,8 +169,12 @@ async def scoreboard(request: Request):
             scores.append(entry)
     else:
         scores = raw_scores
+
+    scanner_perf = scanner_learner.get_performance_summary()
+
     return _render(request, "scoreboard.html", {
         "scores": scores,
+        "scanner": scanner_perf,
     })
 
 
@@ -352,7 +356,10 @@ async def api_performance():
 
 @app.get("/api/scoreboard")
 async def api_scoreboard():
-    return improvement_engine.compute_strategy_scores()
+    return {
+        "strategies": improvement_engine.compute_strategy_scores(),
+        "scanner": scanner_learner.get_performance_summary(),
+    }
 
 
 @app.get("/api/open-positions")
@@ -387,93 +394,27 @@ _scan_state = {"running": False, "progress": 0, "total": 0, "results": [], "done
 
 
 def _run_full_scan():
-    import yfinance as yf
-    from data.advanced_analysis import full_analysis
-    from data.preprocessor import Preprocessor
-
     _scan_state["running"] = True
     _scan_state["done"] = False
     _scan_state["results"] = []
     _scan_state["progress"] = 0
 
-    symbols = fetch_all_nse_symbols()
-    _scan_state["total"] = len(symbols)
-    logger.info(f"Scanner: starting full scan of {len(symbols)} stocks")
-
-    batch_size = 50
-    results = []
-
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
-        tickers_str = " ".join(batch)
-
-        try:
-            data = yf.download(tickers_str, period="1y", progress=False, threads=True, group_by="ticker")
-        except Exception as e:
-            logger.debug(f"Scanner batch download failed: {e}")
-            _scan_state["progress"] = min(i + batch_size, len(symbols))
-            continue
-
-        for sym in batch:
-            try:
-                if len(batch) == 1:
-                    df = data.copy()
-                else:
-                    if sym not in data.columns.get_level_values(0):
-                        continue
-                    df = data[sym].copy()
-
-                df = df.dropna(subset=["Close"])
-                if len(df) < 60:
-                    continue
-
-                df.index = pd.to_datetime(df.index).tz_localize(None)
-                df = df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"})
-                df = df[["open", "high", "low", "close", "volume"]]
-                df["symbol"] = sym
-
-                analysis = full_analysis(df)
-
-                if analysis["signal"] in ("NO_SIGNAL",):
-                    continue
-
-                mtf = analysis.get("multi_timeframe", {})
-                rs = analysis.get("relative_strength", {})
-                factors = ", ".join(analysis.get("confluence_points", [])[:3])
-
-                results.append({
-                    "symbol": sym,
-                    "signal": analysis["signal"],
-                    "confluence_score": analysis["confluence_score"],
-                    "max_confluence": analysis["max_confluence"],
-                    "current_price": analysis.get("current_price"),
-                    "entry": analysis.get("entry"),
-                    "target": analysis.get("target"),
-                    "stop_loss": analysis.get("stop_loss"),
-                    "weekly_trend": mtf.get("weekly_trend", "—"),
-                    "rs_trend": rs.get("rs_trend", "—"),
-                    "factors": factors,
-                })
-            except Exception:
-                continue
-
-        _scan_state["progress"] = min(i + batch_size, len(symbols))
-        _scan_state["results"] = sorted(results, key=lambda r: (
+    def on_progress(scanned, total, results_so_far):
+        _scan_state["total"] = total
+        _scan_state["progress"] = scanned
+        _scan_state["results"] = sorted(results_so_far, key=lambda r: (
             0 if r["signal"] == "STRONG_BUY" else 1 if r["signal"] == "BUY" else 2,
             -r["confluence_score"]
         ))
 
-    _scan_state["results"] = sorted(results, key=lambda r: (
-        0 if r["signal"] == "STRONG_BUY" else 1 if r["signal"] == "BUY" else 2,
-        -r["confluence_score"]
-    ))
+    try:
+        results = scanner_learner.run_full_scan(on_progress=on_progress)
+        _scan_state["results"] = results
+    except Exception as e:
+        logger.error(f"Scanner failed: {e}", exc_info=True)
+
     _scan_state["running"] = False
     _scan_state["done"] = True
-    try:
-        scanner_learner.save_scan_results(results)
-    except Exception as e:
-        logger.warning(f"Scanner learner save failed: {e}")
-    logger.info(f"Scanner: done. {len(results)} signals found from {len(symbols)} stocks.")
 
 
 @app.get("/api/scanner")
@@ -517,6 +458,12 @@ async def api_scanner_learn():
 async def api_scanner_performance():
     result = scanner_learner.get_performance_summary()
     return _sanitize(result)
+
+
+@app.get("/api/scanner/latest")
+async def api_scanner_latest():
+    results = scanner_learner.get_latest_scan_results()
+    return _sanitize({"results": results, "count": len(results)})
 
 
 if __name__ == "__main__":

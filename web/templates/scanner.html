@@ -34,6 +34,7 @@
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">R:R</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Weekly</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">RS</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Strategies</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Factors</th>
             </tr>
         </thead>
@@ -59,6 +60,22 @@
 <script>
 var allResults = [];
 var pollTimer = null;
+
+(function loadLastScan() {
+    fetch('/api/scanner/latest')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.results && data.results.length > 0) {
+                allResults = data.results;
+                renderResults(allResults);
+                document.getElementById('emptyState').style.display = 'none';
+                var scanDate = data.results[0].scan_date || '';
+                var buyCount = data.results.filter(function(r) { return r.signal === 'BUY' || r.signal === 'STRONG_BUY'; }).length;
+                var watchCount = data.results.filter(function(r) { return r.signal === 'WATCH'; }).length;
+                document.getElementById('scanStatus').textContent = 'Last scan: ' + scanDate + ' — ' + buyCount + ' BUY, ' + watchCount + ' WATCH from ' + data.count + ' picks';
+            }
+        });
+})();
 
 (function loadPerformance() {
     fetch('/api/scanner/performance')
@@ -161,7 +178,7 @@ function filterResults() {
 function renderResults(results) {
     var tbody = document.getElementById('resultsBody');
     if (!results.length) {
-        tbody.innerHTML = '<tr><td colspan="11" style="padding: 30px; text-align: center; color: #6b7280;">No stocks match this filter</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="padding: 30px; text-align: center; color: #6b7280;">No stocks match this filter</td></tr>';
         document.getElementById('resultsTable').style.display = 'block';
         return;
     }
@@ -194,6 +211,7 @@ function renderResults(results) {
             '<td style="padding: 10px 12px; font-family: monospace;">' + (rr || '—') + '</td>' +
             '<td style="padding: 10px 12px; color:' + weeklyColor + '; font-size: 11px; font-weight: 700;">' + (r.weekly_trend || '—') + '</td>' +
             '<td style="padding: 10px 12px; color:' + rsColor + '; font-size: 11px; font-weight: 700;">' + (r.rs_trend || '—') + '</td>' +
+            '<td style="padding: 10px 12px; font-size: 11px; max-width: 180px;">' + (r.strategies && r.strategies.length ? r.strategies.map(function(s) { return '<span style="background: #3b82f622; color: #3b82f6; padding: 2px 6px; border-radius: 3px; font-weight: 600; margin-right: 3px; display: inline-block; margin-bottom: 2px;">' + s + '</span>'; }).join('') : '<span style="color: #4b5563;">—</span>') + '</td>' +
             '<td style="padding: 10px 12px; color: #9ca3af; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + (r.factors || '') + '</td>' +
             '</tr>';
     }).join('');

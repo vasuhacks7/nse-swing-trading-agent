@@ -7,6 +7,7 @@ import pandas as pd
 from config.settings import Settings
 from data.store import DataStore
 from reflection.llm_advisor import LLMAdvisor
+from agent.scanner_learner import ScannerLearner
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class ImprovementEngine:
         self.llm_advisor = LLMAdvisor(
             model=settings.reflection.get("model", "claude-sonnet-5"),
         )
+        self.scanner_learner = ScannerLearner(settings)
 
     def compute_strategy_scores(self) -> dict[str, dict]:
         strategies = self.settings.get_enabled_strategies()
@@ -122,7 +124,8 @@ class ImprovementEngine:
             return {}
 
         scores = self.compute_strategy_scores()
-        performance = self._format_performance(closed, scores)
+        scanner_perf = self.scanner_learner.get_performance_summary()
+        performance = self._format_performance(closed, scores, scanner_perf)
 
         logger.info("Requesting LLM analysis of trading performance...")
         analysis = self.llm_advisor.analyze_performance(performance, scores)
@@ -158,7 +161,10 @@ class ImprovementEngine:
         logger.info("Step 2: Updating strategy weights based on performance...")
         new_weights = self.update_strategy_weights()
 
-        logger.info("Step 3: Running LLM reflection...")
+        logger.info("Step 3: Scanner self-learning (factor weights + min confluence)...")
+        scanner_result = self.scanner_learner.learn_from_results()
+
+        logger.info("Step 4: Running LLM reflection (strategies + scanner combined)...")
         reflection = self.run_llm_reflection()
 
         save_path = str(self.settings.log_dir / f"config_{datetime.now():%Y%m%d_%H%M%S}.yaml")
@@ -168,10 +174,11 @@ class ImprovementEngine:
         return {
             "strategy_scores": scores,
             "new_weights": new_weights,
+            "scanner_learning": scanner_result,
             "reflection": reflection,
         }
 
-    def _format_performance(self, closed: pd.DataFrame, scores: dict) -> str:
+    def _format_performance(self, closed: pd.DataFrame, scores: dict, scanner_perf: dict = None) -> str:
         lines = ["## Closed Trade History (most recent first)\n"]
         for _, t in closed.head(30).iterrows():
             lines.append(
@@ -190,5 +197,21 @@ class ImprovementEngine:
                 f"Avg return: {s.get('avg_return_pct',0):+.2f}% | "
                 f"Weight: {s.get('current_weight',1.0):.2f}"
             )
+
+        if scanner_perf and scanner_perf.get("total_picks"):
+            lines.append("\n## Scanner Confluence Performance\n")
+            lines.append(
+                f"- Total scanner picks: {scanner_perf['total_picks']} | "
+                f"Win rate: {scanner_perf.get('win_rate', 0):.1%} | "
+                f"Avg return: {scanner_perf.get('avg_pnl', 0):+.1f}% | "
+                f"Min confluence: {scanner_perf.get('min_confluence', 2)}/12"
+            )
+            for f in scanner_perf.get("factor_scores", []):
+                lines.append(
+                    f"  - {f['factor']}: {f['total_picks']} picks | "
+                    f"Win rate: {f['win_rate']:.1%} | "
+                    f"Avg return: {f.get('avg_return_pct', 0):+.1f}% | "
+                    f"Weight: {f['weight']:.2f}x"
+                )
 
         return "\n".join(lines)
