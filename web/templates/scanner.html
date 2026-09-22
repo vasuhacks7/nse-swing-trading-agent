@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% set active = "scanner" %}
+{% block title %}Stock Scanner{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">Stock Scanner</div>
+    <div class="page-subtitle">Scans top NSE stocks and filters for swing trade setups — BUY, WATCH, or skip</div>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
+    <button id="scanBtn" onclick="startScan()" class="generate-btn" style="font-size: 14px;">
+        Scan Now
+    </button>
+    <select id="filterSignal" onchange="filterResults()" style="background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 8px 14px; font-size: 13px;">
+        <option value="all">All Signals</option>
+        <option value="buy">BUY Only</option>
+        <option value="watch">WATCH Only</option>
+    </select>
+    <span id="scanStatus" style="color: #9ca3af; font-size: 13px;"></span>
+</div>
+
+<div id="resultsTable" style="display: none;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+            <tr style="border-bottom: 2px solid #334155; text-align: left;">
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Symbol</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Signal</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Confluence</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">CMP</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Entry</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Target</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">SL</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">R:R</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Weekly</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">RS</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Factors</th>
+            </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+    </table>
+</div>
+
+<div id="emptyState" class="empty-state">
+    <div class="icon">🔍</div>
+    <p>Click <strong>Scan Now</strong> to scan top NSE stocks for swing trade setups.<br>
+    The scanner analyzes each stock for confluence of technical factors and shows actionable BUY/WATCH signals.</p>
+    <p style="color: #6b7280; font-size: 12px; margin-top: 8px;">Scans ~50 most liquid stocks. Takes 2-3 minutes.</p>
+</div>
+
+<script>
+var allResults = [];
+
+function startScan() {
+    var btn = document.getElementById('scanBtn');
+    var status = document.getElementById('scanStatus');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    status.textContent = 'Scanning top NSE stocks — this takes 2-3 minutes...';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('resultsTable').style.display = 'none';
+    allResults = [];
+
+    fetch('/api/scanner')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            allResults = data.results || [];
+            btn.disabled = false;
+            btn.textContent = 'Scan Now';
+            var buyCount = allResults.filter(function(r) { return r.signal === 'BUY' || r.signal === 'STRONG_BUY'; }).length;
+            var watchCount = allResults.filter(function(r) { return r.signal === 'WATCH'; }).length;
+            status.textContent = 'Found ' + buyCount + ' BUY and ' + watchCount + ' WATCH signals out of ' + data.scanned + ' stocks';
+            renderResults(allResults);
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.textContent = 'Scan Now';
+            status.textContent = 'Scan failed: ' + err.message;
+        });
+}
+
+function filterResults() {
+    var filter = document.getElementById('filterSignal').value;
+    var filtered = allResults;
+    if (filter === 'buy') {
+        filtered = allResults.filter(function(r) { return r.signal === 'BUY' || r.signal === 'STRONG_BUY'; });
+    } else if (filter === 'watch') {
+        filtered = allResults.filter(function(r) { return r.signal === 'WATCH'; });
+    }
+    renderResults(filtered);
+}
+
+function renderResults(results) {
+    var tbody = document.getElementById('resultsBody');
+    if (!results.length) {
+        tbody.innerHTML = '<tr><td colspan="11" style="padding: 30px; text-align: center; color: #6b7280;">No stocks match this filter</td></tr>';
+        document.getElementById('resultsTable').style.display = 'block';
+        return;
+    }
+
+    tbody.innerHTML = results.map(function(r) {
+        var signalColor = '#6b7280';
+        if (r.signal === 'STRONG_BUY') signalColor = '#22c55e';
+        else if (r.signal === 'BUY') signalColor = '#3b82f6';
+        else if (r.signal === 'WATCH') signalColor = '#eab308';
+
+        var weeklyColor = r.weekly_trend === 'BULLISH' ? '#22c55e' : r.weekly_trend === 'BEARISH' ? '#ef4444' : '#eab308';
+        var rsColor = r.rs_trend === 'OUTPERFORMING' ? '#22c55e' : '#ef4444';
+
+        var rr = '';
+        if (r.entry && r.stop_loss && r.target) {
+            var risk = r.entry - r.stop_loss;
+            var reward = r.target - r.entry;
+            rr = risk > 0 ? '1:' + (reward/risk).toFixed(1) : '—';
+        }
+
+        var symbol = r.symbol.replace('.NS', '');
+        return '<tr style="border-bottom: 1px solid #1e293b; cursor: pointer;" onclick="window.location=\'/analysis?symbol=' + symbol + '\'">' +
+            '<td style="padding: 10px 12px;"><strong style="color: #e2e8f0;">' + symbol + '</strong></td>' +
+            '<td style="padding: 10px 12px;"><span style="background:' + signalColor + '22; color:' + signalColor + '; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11px;">' + r.signal.replace('_', ' ') + '</span></td>' +
+            '<td style="padding: 10px 12px; font-family: monospace;">' + r.confluence_score + '/' + r.max_confluence + '</td>' +
+            '<td style="padding: 10px 12px; font-family: monospace;">₹' + (r.current_price ? r.current_price.toFixed(2) : '—') + '</td>' +
+            '<td style="padding: 10px 12px; font-family: monospace; color: #3b82f6;">' + (r.entry ? '₹' + r.entry.toFixed(2) : '—') + '</td>' +
+            '<td style="padding: 10px 12px; font-family: monospace; color: #22c55e;">' + (r.target ? '₹' + r.target.toFixed(2) : '—') + '</td>' +
+            '<td style="padding: 10px 12px; font-family: monospace; color: #ef4444;">' + (r.stop_loss ? '₹' + r.stop_loss.toFixed(2) : '—') + '</td>' +
+            '<td style="padding: 10px 12px; font-family: monospace;">' + (rr || '—') + '</td>' +
+            '<td style="padding: 10px 12px; color:' + weeklyColor + '; font-size: 11px; font-weight: 700;">' + (r.weekly_trend || '—') + '</td>' +
+            '<td style="padding: 10px 12px; color:' + rsColor + '; font-size: 11px; font-weight: 700;">' + (r.rs_trend || '—') + '</td>' +
+            '<td style="padding: 10px 12px; color: #9ca3af; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + (r.factors || '') + '</td>' +
+            '</tr>';
+    }).join('');
+
+    document.getElementById('resultsTable').style.display = 'block';
+}
+</script>
+{% endblock %}

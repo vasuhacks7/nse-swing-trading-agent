@@ -373,6 +373,73 @@ async def api_search_symbols(q: str = ""):
     return results
 
 
+@app.get("/scanner", response_class=HTMLResponse)
+async def scanner_page(request: Request):
+    return _render(request, "scanner.html", {})
+
+
+SCANNER_STOCKS = [
+    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL",
+    "ITC", "KOTAKBANK", "LT", "AXISBANK", "MARUTI", "TITAN", "SUNPHARMA",
+    "TATAMOTORS", "WIPRO", "HCLTECH", "BAJFINANCE", "NTPC", "POWERGRID",
+    "ONGC", "ADANIENT", "JSWSTEEL", "TATASTEEL", "TECHM", "CIPLA", "DRREDDY",
+    "EICHERMOT", "BAJAJ-AUTO", "BPCL", "COALINDIA", "BRITANNIA", "APOLLOHOSP",
+    "M&M", "HINDALCO", "TRENT", "ZOMATO", "DLF", "HAL", "BEL",
+    "IRCTC", "TATAPOWER", "DIXON", "POLYCAB", "PERSISTENT", "COFORGE",
+    "CHOLAFIN", "DMART", "INDIGO", "PIIND",
+]
+
+
+@app.get("/api/scanner")
+async def api_scanner():
+    from data.fetcher import DataFetcher
+    from data.advanced_analysis import full_analysis
+
+    fetcher = DataFetcher(settings)
+    results = []
+    scanned = 0
+
+    for symbol in SCANNER_STOCKS:
+        nse_symbol = f"{symbol}.NS"
+        try:
+            df = fetcher.fetch_ohlcv(nse_symbol, period="1y")
+            if df.empty or len(df) < 60:
+                continue
+            scanned += 1
+            analysis = full_analysis(df)
+
+            if analysis["signal"] in ("NO_SIGNAL",):
+                continue
+
+            mtf = analysis.get("multi_timeframe", {})
+            rs = analysis.get("relative_strength", {})
+            factors = ", ".join(analysis.get("confluence_points", [])[:3])
+
+            results.append({
+                "symbol": nse_symbol,
+                "signal": analysis["signal"],
+                "confluence_score": analysis["confluence_score"],
+                "max_confluence": analysis["max_confluence"],
+                "current_price": analysis.get("current_price"),
+                "entry": analysis.get("entry"),
+                "target": analysis.get("target"),
+                "stop_loss": analysis.get("stop_loss"),
+                "weekly_trend": mtf.get("weekly_trend", "—"),
+                "rs_trend": rs.get("rs_trend", "—"),
+                "factors": factors,
+            })
+        except Exception as e:
+            logger.debug(f"Scanner skip {symbol}: {e}")
+            continue
+
+    results.sort(key=lambda r: (
+        0 if r["signal"] == "STRONG_BUY" else 1 if r["signal"] == "BUY" else 2,
+        -r["confluence_score"]
+    ))
+
+    return _sanitize({"results": results, "scanned": scanned})
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
