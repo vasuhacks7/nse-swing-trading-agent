@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Market Context Bar -->
+<div class="regime-bar">
+    {% set r = regime.get('regime', 'UNKNOWN') %}
+    <span class="tag {{ r|lower }}">{{ r }}</span>
+    <span class="sep">&bull;</span>
+    <span class="item">Nifty <strong>{{ regime.get('nifty_close', '—') }}</strong></span>
+    <span class="item">RSI <strong>{{ regime.get('nifty_rsi', '—') }}</strong></span>
+    <span class="item">5d <strong>{{ regime.get('return_5d', '—') }}%</strong></span>
+    <span class="sep">&bull;</span>
+    <span class="item">FII <strong>{{ flows.get('fii_sentiment', '—') }}</strong></span>
+    {% if flows.get('fii_net_cr') is not none %}
+    <span class="item">FII Net <strong>{{ "%.0f"|format(flows.fii_net_cr) }} Cr</strong></span>
+    {% endif %}
+    <span class="sep">&bull;</span>
+    <span class="item">
+        {% if market_status.open %}
+        <span class="live-dot open"></span><strong style="color: var(--green-light)">LIVE</strong>
+        {% else %}
+        <span class="live-dot closed"></span><strong style="color: var(--red-light)">CLOSED</strong>
+        <span style="color: var(--text-muted); font-size: 11px;">({{ market_status.reason }})</span>
+        {% endif %}
+    </span>
+</div>
+
+<!-- Performance Metrics -->
+{% if perf.get('total_trades', 0) > 0 %}
+<div class="metrics">
+    <div class="metric-card">
+        <div class="label">Total Trades</div>
+        <div class="value">{{ perf.total_trades }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Win Rate</div>
+        <div class="value {% if perf.win_rate >= 50 %}green{% else %}red{% endif %}">{{ perf.win_rate }}%</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Avg Return</div>
+        <div class="value {% if perf.avg_return_pct > 0 %}green{% else %}red{% endif %}">{{ "%+.2f"|format(perf.avg_return_pct) }}%</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Total P&L</div>
+        <div class="value {% if perf.total_pnl_pct > 0 %}green{% else %}red{% endif %}">{{ "%+.2f"|format(perf.total_pnl_pct) }}%</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Best Trade</div>
+        <div class="value green">{{ "%+.2f"|format(perf.best_trade) }}%</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Streak</div>
+        <div class="value blue">{{ perf.get('current_streak', '—') }}</div>
+    </div>
+</div>
+{% else %}
+<div class="metrics">
+    <div class="metric-card">
+        <div class="label">Total Trades</div>
+        <div class="value">0</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Win Rate</div>
+        <div class="value blue">—</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Avg Return</div>
+        <div class="value blue">—</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Status</div>
+        <div class="value blue">Ready</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Today's Alerts -->
+<div class="section">
+    <div class="section-title">
+        Today's Alerts
+        {% if alerts %}<span class="badge">{{ alerts|length }}</span>{% endif %}
+    </div>
+
+    {% if alerts %}
+        {% for a in alerts %}
+        <div class="alert-card">
+            <div class="header">
+                <div>
+                    <div class="symbol">{{ a.action }} {{ a.symbol }}</div>
+                </div>
+                <span class="strategy-tag">{{ a.strategy }}</span>
+            </div>
+            <div class="prices">
+                <div class="price-item">
+                    <div class="label">Entry</div>
+                    <div class="val" style="color: var(--accent)">₹{{ "%.2f"|format(a.entry_price) }}</div>
+                </div>
+                <div class="price-item">
+                    <div class="label">Target</div>
+                    <div class="val" style="color: var(--green-light)">₹{{ "%.2f"|format(a.target_price or 0) }}</div>
+                </div>
+                <div class="price-item">
+                    <div class="label">Stop Loss</div>
+                    <div class="val" style="color: var(--red-light)">₹{{ "%.2f"|format(a.stop_loss or 0) }}</div>
+                </div>
+                <div class="price-item">
+                    <div class="label">R:R Ratio</div>
+                    <div class="val" style="color: var(--orange)">1:{{ "%.1f"|format(a.risk_reward_ratio or 0) }}</div>
+                </div>
+                <div class="price-item">
+                    <div class="label">Signal Score</div>
+                    <div class="val">{{ "%.3f"|format(a.signal_score or 0) }}</div>
+                </div>
+                <div class="price-item">
+                    <div class="label">Deploy</div>
+                    <div class="val" style="color: var(--purple)">{{ "%.0f"|format((a.qty_pct or 1) * 100) }}%</div>
+                </div>
+            </div>
+            {% if a.reasoning %}
+            <div class="reasoning">{{ a.reasoning }}</div>
+            {% endif %}
+            <div class="meta">
+                {% if a.technical_summary %}<span>{{ a.technical_summary }}</span>{% endif %}
+                {% if a.fundamental_summary %}<span>{{ a.fundamental_summary }}</span>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <div class="icon">📊</div>
+            <p>No alerts generated today.<br>Click <strong>Generate Alerts</strong> to scan the market.</p>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Open Positions -->
+{% if open_positions %}
+<div class="section">
+    <div class="section-title">
+        Open Positions
+        <span class="badge">{{ open_positions|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Strategy</th>
+                    <th>Entry</th>
+                    <th>Target</th>
+                    <th>Stop Loss</th>
+                    <th>Trail SL</th>
+                    <th>R:R</th>
+                    <th>Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in open_positions %}
+                <tr>
+                    <td>{{ p.date }}</td>
+                    <td><a href="/analysis?symbol={{ p.symbol|replace('.NS', '') }}"><strong>{{ p.symbol }}</strong></a></td>
+                    <td>{{ p.strategy }}</td>
+                    <td style="color: var(--accent)">₹{{ "%.2f"|format(p.entry_price) }}</td>
+                    <td style="color: var(--green-light)">₹{{ "%.2f"|format(p.target_price or 0) }}</td>
+                    <td style="color: var(--red-light)">₹{{ "%.2f"|format(p.stop_loss or 0) }}</td>
+                    <td>{% if p.trailing_stop %}₹{{ "%.2f"|format(p.trailing_stop) }}{% else %}—{% endif %}</td>
+                    <td style="color: var(--orange)">1:{{ "%.1f"|format(p.risk_reward_ratio or 0) }}</td>
+                    <td>{{ "%.3f"|format(p.signal_score or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

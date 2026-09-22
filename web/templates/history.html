@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% set active = "history" %}
+{% block title %}History{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">Alert History & P&L</div>
+    <div class="page-subtitle">Complete record of all generated alerts and trade outcomes</div>
+</div>
+
+{% if alerts %}
+<!-- Summary Metrics -->
+{% if closed_trades %}
+<div class="metrics">
+    {% set wins = closed_trades|selectattr('pnl_pct', 'gt', 0)|list %}
+    {% set total = closed_trades|length %}
+    <div class="metric-card">
+        <div class="label">Closed Trades</div>
+        <div class="value">{{ total }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Winners</div>
+        <div class="value green">{{ wins|length }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Losers</div>
+        <div class="value red">{{ total - wins|length }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Win Rate</div>
+        <div class="value {% if wins|length / total > 0.5 %}green{% else %}red{% endif %}">
+            {{ "%.1f"|format(wins|length / total * 100) }}%
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="section">
+    <div class="section-title">
+        All Alerts
+        <span class="badge">{{ alerts|length }}</span>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Strategy</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>P&L</th>
+                    <th>R:R</th>
+                    <th>Days</th>
+                    <th>Exit Reason</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in alerts %}
+                <tr>
+                    <td>{{ a.date }}</td>
+                    <td><a href="/analysis?symbol={{ a.symbol|replace('.NS', '') }}"><strong>{{ a.symbol }}</strong></a></td>
+                    <td>{{ a.strategy }}</td>
+                    <td style="color: var(--accent)">₹{{ "%.2f"|format(a.entry_price) }}</td>
+                    <td>{% if a.exit_price %}₹{{ "%.2f"|format(a.exit_price) }}{% else %}<span style="color: var(--text-muted)">—</span>{% endif %}</td>
+                    <td>
+                        {% if a.pnl_pct is not none and a.pnl_pct is not none %}
+                            <span class="{% if a.pnl_pct > 0 %}pnl-positive{% else %}pnl-negative{% endif %}">
+                                {{ "%+.2f"|format(a.pnl_pct) }}%
+                            </span>
+                        {% else %}<span style="color: var(--text-muted)">—</span>{% endif %}
+                    </td>
+                    <td style="color: var(--orange)">{% if a.risk_reward_ratio %}1:{{ "%.1f"|format(a.risk_reward_ratio) }}{% else %}—{% endif %}</td>
+                    <td>{% if a.holding_days is not none %}{{ a.holding_days }}d{% else %}<span style="color: var(--text-muted)">—</span>{% endif %}</td>
+                    <td>{{ a.exit_reason or '—' }}</td>
+                    <td><span class="status {{ a.status|lower }}">{{ a.status }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% else %}
+<div class="empty-state">
+    <div class="icon">📋</div>
+    <p>No alert history yet. Generate some alerts to start tracking performance.</p>
+</div>
+{% endif %}
+{% endblock %}

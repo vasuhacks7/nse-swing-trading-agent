@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% set active = "premium" %}
+
+{% block title %}Premium Picks{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">Premium Picks <span style="opacity:0.5;font-size:0.5em">Curated Expert Analysis</span></div>
+    <a href="#" class="generate-btn" id="scanBtn" onclick="scanChannel(event)">Scan Sources</a>
+</div>
+
+<!-- Performance Summary -->
+<div class="regime-bar" style="margin-bottom:1.5rem">
+    <div class="regime-item">
+        <span class="regime-label">Total Picks</span>
+        <span class="regime-value">{{ performance.total_picks or 0 }}</span>
+    </div>
+    <div class="regime-item">
+        <span class="regime-label">Open</span>
+        <span class="regime-value" style="color:var(--accent-blue)">{{ performance.open or 0 }}</span>
+    </div>
+    <div class="regime-item">
+        <span class="regime-label">Win Rate</span>
+        <span class="regime-value {% if (performance.win_rate or 0) > 55 %}text-profit{% elif (performance.win_rate or 0) < 40 %}text-loss{% endif %}">{{ "%.1f"|format(performance.win_rate or 0) }}%</span>
+    </div>
+    <div class="regime-item">
+        <span class="regime-label">Avg Return</span>
+        <span class="regime-value {% if (performance.avg_return or 0) > 0 %}text-profit{% else %}text-loss{% endif %}">{{ "%+.2f"|format(performance.avg_return or 0) }}%</span>
+    </div>
+    <div class="regime-item">
+        <span class="regime-label">Total Return</span>
+        <span class="regime-value {% if (performance.total_return or 0) > 0 %}text-profit{% else %}text-loss{% endif %}">{{ "%+.2f"|format(performance.total_return or 0) }}%</span>
+    </div>
+    <div class="regime-item">
+        <span class="regime-label">AI Verified</span>
+        <span class="regime-value">{{ "%.0f"|format(performance.cross_validated_pct or 0) }}%</span>
+    </div>
+</div>
+
+{% if suggestions %}
+<!-- AI-Confirmed Setups -->
+<div class="card" style="border:1px solid rgba(0,200,150,0.3);background:rgba(0,200,150,0.05)">
+    <h3 style="color:var(--accent-green);margin-bottom:0.75rem">AI-Confirmed Setups</h3>
+    <p style="opacity:0.6;font-size:0.85rem;margin-bottom:1rem">Expert picks verified by our 12-point confluence engine — higher probability setups</p>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Entry</th>
+                    <th>Target</th>
+                    <th>SL</th>
+                    <th>Confluence</th>
+                    <th>Our Signal</th>
+                    <th>Confidence</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in suggestions %}
+                <tr>
+                    <td><a href="/analysis?symbol={{ s.symbol }}" style="color:var(--accent-blue);text-decoration:none;font-weight:600">{{ s.symbol }}</a></td>
+                    <td class="mono">{{ "%.2f"|format(s.apoorv_entry or 0) if s.apoorv_entry else '—' }}</td>
+                    <td class="mono text-profit">{{ "%.2f"|format(s.apoorv_target or 0) if s.apoorv_target else '—' }}</td>
+                    <td class="mono text-loss">{{ "%.2f"|format(s.apoorv_sl or 0) if s.apoorv_sl else '—' }}</td>
+                    <td><span class="badge {% if s.our_confluence >= 5 %}badge-bullish{% else %}badge-neutral{% endif %}">{{ s.our_confluence }}/12</span></td>
+                    <td><span class="badge {% if s.our_signal in ('STRONG_BUY','BUY') %}badge-bullish{% else %}badge-neutral{% endif %}">{{ s.our_signal }}</span></td>
+                    <td><span class="badge {% if s.confidence == 'HIGH' %}badge-bullish{% else %}badge-neutral{% endif %}">{{ s.confidence }}</span></td>
+                    <td>{{ s.date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if patterns and patterns.insights %}
+<!-- Learning Insights -->
+<div class="card" style="border:1px solid rgba(99,102,241,0.3);background:rgba(99,102,241,0.05)">
+    <h3 style="color:var(--accent-blue);margin-bottom:0.75rem">Learning Insights</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:1rem">
+        <div>
+            <div style="opacity:0.6;font-size:0.8rem">Verified Win Rate</div>
+            <div class="mono" style="font-size:1.2rem;font-weight:700">{{ "%.1f"|format(patterns.validated_win_rate or 0) }}%</div>
+        </div>
+        <div>
+            <div style="opacity:0.6;font-size:0.8rem">Unverified Win Rate</div>
+            <div class="mono" style="font-size:1.2rem;font-weight:700">{{ "%.1f"|format(patterns.unvalidated_win_rate or 0) }}%</div>
+        </div>
+        <div>
+            <div style="opacity:0.6;font-size:0.8rem">Avg Win Confluence</div>
+            <div class="mono" style="font-size:1.2rem;font-weight:700">{{ patterns.avg_win_confluence or 0 }}/12</div>
+        </div>
+        <div>
+            <div style="opacity:0.6;font-size:0.8rem">Avg Loss Confluence</div>
+            <div class="mono" style="font-size:1.2rem;font-weight:700">{{ patterns.avg_loss_confluence or 0 }}/12</div>
+        </div>
+    </div>
+    <ul style="list-style:none;padding:0;margin:0">
+        {% for insight in patterns.insights %}
+        <li style="padding:0.5rem 0;border-top:1px solid rgba(255,255,255,0.06);font-size:0.9rem">{{ insight }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<!-- Tracked Stocks -->
+{% if open_picks %}
+<div class="card">
+    <h3>Tracked Stocks <span class="badge badge-neutral">{{ open_picks|length }}</span></h3>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Type</th>
+                    <th>Entry</th>
+                    <th>Target</th>
+                    <th>Current</th>
+                    <th>Our Signal</th>
+                    <th>Confluence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in open_picks %}
+                <tr>
+                    <td>{{ p.date }}</td>
+                    <td><a href="/analysis?symbol={{ p.symbol }}" style="color:var(--accent-blue);text-decoration:none;font-weight:600">{{ p.symbol }}</a></td>
+                    <td><span class="badge {% if p.signal_type == 'BUY' %}badge-bullish{% elif p.signal_type == 'ANALYSIS' %}badge-neutral{% else %}badge-neutral{% endif %}">{{ p.signal_type or 'ANALYSIS' }}</span></td>
+                    <td class="mono">{{ "%.2f"|format(p.entry_price) if p.entry_price else '—' }}</td>
+                    <td class="mono text-profit">{{ "%.2f"|format(p.target_price) if p.target_price else '—' }}</td>
+                    <td class="mono">{{ "%.2f"|format(p.current_price) if p.current_price else '—' }}</td>
+                    <td>
+                        {% if p.our_signal %}
+                        <span class="badge {% if p.our_signal in ('STRONG_BUY','BUY') %}badge-bullish{% elif p.our_signal in ('SELL','STRONG_SELL') %}badge-bearish{% else %}badge-neutral{% endif %}">{{ p.our_signal }}</span>
+                        {% else %}
+                        <span class="badge badge-neutral">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td class="mono">{{ p.our_confluence_score if p.our_confluence_score else '—' }}/12</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Closed Picks -->
+{% if closed_picks %}
+<div class="card">
+    <h3>Closed Picks <span class="badge badge-neutral">{{ closed_picks|length }}</span></h3>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>P&L</th>
+                    <th>Reason</th>
+                    <th>Verified</th>
+                    <th>Confluence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in closed_picks %}
+                <tr>
+                    <td>{{ p.date }}</td>
+                    <td><a href="/analysis?symbol={{ p.symbol }}" style="color:var(--accent-blue);text-decoration:none;font-weight:600">{{ p.symbol }}</a></td>
+                    <td class="mono">{{ "%.2f"|format(p.entry_price) if p.entry_price else '—' }}</td>
+                    <td class="mono">{{ "%.2f"|format(p.exit_price) if p.exit_price else '—' }}</td>
+                    <td class="mono {% if (p.pnl_pct or 0) > 0 %}text-profit{% else %}text-loss{% endif %}">{{ "%+.2f"|format(p.pnl_pct or 0) }}%</td>
+                    <td><span class="badge {% if p.exit_reason == 'TARGET_HIT' %}badge-bullish{% elif p.exit_reason == 'STOP_LOSS_HIT' %}badge-bearish{% else %}badge-neutral{% endif %}">{{ p.exit_reason or '—' }}</span></td>
+                    <td>{% if p.cross_validated %}<span style="color:var(--accent-green)">Yes</span>{% else %}<span style="opacity:0.4">No</span>{% endif %}</td>
+                    <td class="mono">{{ p.our_confluence_score if p.our_confluence_score else '—' }}/12</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if not picks %}
+<div class="card" style="text-align:center;padding:3rem">
+    <div style="font-size:2rem;margin-bottom:1rem;opacity:0.3">📡</div>
+    <h3 style="opacity:0.5">No picks scanned yet</h3>
+    <p style="opacity:0.4;margin-bottom:1.5rem">Click "Scan Sources" to fetch the latest expert stock analysis and cross-validate with our engine</p>
+    <a href="#" class="generate-btn" onclick="scanChannel(event)">Scan Now</a>
+</div>
+{% endif %}
+
+<!-- Recent Analysis Feed -->
+{% if picks %}
+<div class="card">
+    <h3>Recent Analysis Feed</h3>
+    <div style="max-height:400px;overflow-y:auto">
+        {% for p in picks[:20] %}
+        <div style="padding:0.75rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">
+                <div>
+                    <a href="/analysis?symbol={{ p.symbol }}" style="font-weight:600;color:var(--accent-blue);text-decoration:none">{{ p.symbol or 'Note' }}</a>
+                    <span class="badge badge-neutral" style="font-size:0.7rem;margin-left:0.5rem">{{ p.signal_type or 'ANALYSIS' }}</span>
+                </div>
+                <span style="opacity:0.4;font-size:0.8rem">{{ p.date }}</span>
+            </div>
+            {% set clean_text = p.message_text.split('https://')[0].split('http://')[0].strip() if p.message_text else '' %}
+            <div style="font-size:0.85rem;opacity:0.7;white-space:pre-wrap;max-height:60px;overflow:hidden">{{ clean_text[:200] }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<script>
+async function scanChannel(e) {
+    e.preventDefault();
+    const btn = document.getElementById('scanBtn');
+    btn.textContent = 'Scanning...';
+    btn.style.opacity = '0.6';
+    btn.style.pointerEvents = 'none';
+    try {
+        const resp = await fetch('/api/apoorv/scan');
+        const data = await resp.json();
+        btn.textContent = `Found ${data.new_picks || 0} new picks`;
+        setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+        btn.textContent = 'Scan Failed';
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+    }
+}
+</script>
+{% endblock %}

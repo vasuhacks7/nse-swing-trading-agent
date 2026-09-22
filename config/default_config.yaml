@@ -1,0 +1,98 @@
+market:
+  country: india
+  exchange: NSE
+  currency: INR
+  data_source: yahoo
+  cache_days: 1
+  default_period: 1y
+
+  universe_mode: dynamic
+  universe_cache_days: 7
+
+  prefilter:
+    min_price: 50
+    max_price: 50000
+    min_avg_volume: 100000
+
+strategies:
+  momentum_breakout:
+    enabled: true
+    lookback_days: 20
+    volume_surge: 1.5
+    breakout_pct: 0.02
+    weight: 1.0
+
+  mean_reversion:
+    enabled: true
+    rsi_oversold: 30
+    bb_lower_touch: true
+    min_pe_percentile: 30
+    weight: 1.0
+
+  macd_rsi_confluence:
+    enabled: true
+    rsi_buy_zone: [35, 50]
+    macd_crossover: true
+    weight: 1.0
+
+  fundamental_value:
+    enabled: true
+    max_pe: 25
+    min_roe: 15
+    max_debt_equity: 1.0
+    min_revenue_growth: 10
+    weight: 1.0
+
+  trend_following:
+    enabled: true
+    ema_short: 9
+    ema_long: 21
+    adx_min: 25
+    pullback_to_ema: true
+    weight: 1.0
+
+alerts:
+  max_daily_alerts: 2
+  min_signal_score: 0.65
+  no_trade_threshold: 0.70
+  holding_period_days: 10
+  stop_loss_pct: 0.05
+  target_pct: 0.10
+  review_after_days: [5, 10, 15]
+  min_risk_reward: 2.0
+
+scoring:
+  technical_weight: 0.5
+  fundamental_weight: 0.3
+  strategy_track_record_weight: 0.2
+
+risk:
+  max_allocation_per_stock: 0.10
+  stop_loss_pct: 0.05
+  target_pct: 0.10
+
+  trailing_stop:
+    enabled: true
+    activate_after_rr: 1.0
+    trail_pct: 0.03
+
+  position_sizing:
+    installments: 2
+    first_deploy_pct: 0.50
+    add_deploy_pct: 0.50
+    scale_up_after_wins: 5
+    scale_down_after_losses: 2
+    scale_factor: 1.5
+
+improvement:
+  review_interval_days: 7
+  min_trades_for_review: 5
+  promote_threshold_winrate: 0.55
+  demote_threshold_winrate: 0.35
+  strategy_weight_min: 0.2
+  strategy_weight_max: 3.0
+
+reflection:
+  enabled: true
+  model: claude-sonnet-5
+  review_after_trades: 10

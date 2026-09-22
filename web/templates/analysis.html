@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+{% set active = "analysis" %}
+{% block title %}Analysis{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">{% if symbol %}{{ symbol }} Analysis{% else %}Stock Analysis{% endif %}</div>
+    <div class="page-subtitle">Fibonacci, supply/demand zones, candlestick patterns, multi-timeframe confluence & auto paper trading</div>
+</div>
+
+<form class="analyze-form" id="analyzeForm" action="/analysis" method="get">
+    <input type="text" name="symbol" id="symbolInput" placeholder="Enter NSE symbol (e.g. RELIANCE, TCS, HDFCBANK)"
+           value="{{ symbol or '' }}" autocomplete="off">
+    <select name="interval" id="intervalSelect" class="interval-select">
+        <option value="D" {% if interval == 'D' or not interval %}selected{% endif %}>Daily</option>
+        <option value="W" {% if interval == 'W' %}selected{% endif %}>Weekly</option>
+        <option value="M" {% if interval == 'M' %}selected{% endif %}>Monthly</option>
+    </select>
+    <button type="submit" class="generate-btn">Analyze</button>
+</form>
+
+{% if error %}
+<div class="empty-state" style="padding: 30px;">
+    <p style="color: var(--red-light);">{{ error }}</p>
+</div>
+{% endif %}
+
+{% if analysis %}
+<!-- Signal Banner -->
+<div class="signal-banner {{ analysis.signal|lower }}">
+    <div class="signal-row">
+        <div>
+            <div class="signal-label">{{ analysis.signal|replace('_', ' ') }}</div>
+            <div class="signal-detail">
+                Confluence: <strong>{{ analysis.confluence_score }}/{{ analysis.max_confluence }}</strong>
+                &nbsp;&bull;&nbsp; CMP: <strong>₹{{ "%.2f"|format(analysis.current_price) }}</strong>
+                {% if analysis.multi_timeframe and analysis.multi_timeframe.weekly_trend != 'UNKNOWN' %}
+                &nbsp;&bull;&nbsp; Weekly: <strong>{{ analysis.multi_timeframe.weekly_trend }}</strong>
+                {% endif %}
+                {% if analysis.relative_strength and analysis.relative_strength.rs_trend not in ('N/A', None) %}
+                &nbsp;&bull;&nbsp; RS: <strong>{{ analysis.relative_strength.rs_trend }}</strong>
+                {% endif %}
+            </div>
+        </div>
+        {% if analysis.entry %}
+        <div class="signal-levels">
+            <div class="sl-item entry">
+                <span class="sl-label">Entry</span>
+                <span class="sl-val">₹{{ "%.2f"|format(analysis.entry) }}</span>
+            </div>
+            <div class="sl-item target">
+                <span class="sl-label">Target</span>
+                <span class="sl-val">₹{{ "%.2f"|format(analysis.target) }}</span>
+            </div>
+            <div class="sl-item stoploss">
+                <span class="sl-label">Stop Loss</span>
+                <span class="sl-val">₹{{ "%.2f"|format(analysis.stop_loss) }}</span>
+            </div>
+            {% if analysis.entry and analysis.stop_loss and analysis.target %}
+            {% set risk = analysis.entry - analysis.stop_loss %}
+            {% set reward = analysis.target - analysis.entry %}
+            {% if risk > 0 %}
+            <div class="sl-item rr">
+                <span class="sl-label">R:R</span>
+                <span class="sl-val">1:{{ "%.1f"|format(reward / risk) }}</span>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Trade Action -->
+{% if analysis.trade_action == "BOUGHT" %}
+<div class="trade-action bought">
+    Paper Trade Executed: Bought {{ analysis.qty }} shares @ ₹{{ "%.2f"|format(analysis.entry) }}
+    (Invested: ₹{{ "%.0f"|format(analysis.invested) }})
+</div>
+{% elif analysis.trade_action == "ALREADY_HOLDING" %}
+<div class="trade-action holding">Already holding a position in this stock</div>
+{% elif analysis.trade_action == "SKIP_NO_CAPITAL" %}
+<div class="trade-action skip">Insufficient capital for this trade</div>
+{% endif %}
+
+<!-- Multi-Timeframe + RS + VWAP Quick Bar -->
+{% if analysis.multi_timeframe or analysis.relative_strength or analysis.vwap %}
+<div class="regime-bar" style="margin-bottom: 16px;">
+    {% if analysis.multi_timeframe and analysis.multi_timeframe.weekly_trend != 'UNKNOWN' %}
+    <span class="tag {{ analysis.multi_timeframe.weekly_trend|lower }}">W: {{ analysis.multi_timeframe.weekly_trend }}</span>
+    <span class="tag {{ analysis.multi_timeframe.daily_trend|lower }}">D: {{ analysis.multi_timeframe.daily_trend }}</span>
+    <span class="item">Alignment: <strong>{{ analysis.multi_timeframe.alignment }}</strong></span>
+    <span class="sep">&bull;</span>
+    {% endif %}
+    {% if analysis.relative_strength and analysis.relative_strength.rs_trend not in ('N/A', None) %}
+    <span class="item">RS vs Nifty: <strong style="color: {% if analysis.relative_strength.rs_trend == 'OUTPERFORMING' %}var(--green-light){% else %}var(--red-light){% endif %}">{{ analysis.relative_strength.rs_trend }}</strong></span>
+    {% if analysis.relative_strength.alpha_1m is defined %}
+    <span class="item">Alpha 1M: <strong style="color: {% if analysis.relative_strength.alpha_1m > 0 %}var(--green-light){% else %}var(--red-light){% endif %}">{{ "%+.1f"|format(analysis.relative_strength.alpha_1m) }}%</strong></span>
+    {% endif %}
+    <span class="sep">&bull;</span>
+    {% endif %}
+    {% if analysis.vwap and analysis.vwap.vwap %}
+    <span class="item">VWAP: <strong>₹{{ analysis.vwap.vwap }}</strong> ({{ analysis.vwap.position|replace('_', ' ') }})</span>
+    {% endif %}
+    {% if analysis.cpr and analysis.cpr.pivot %}
+    <span class="sep">&bull;</span>
+    <span class="item">Pivot: <strong>₹{{ analysis.cpr.pivot }}</strong> ({{ analysis.cpr.position|replace('_', ' ') }})</span>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- TradingView Chart -->
+<div class="tv-chart-wrapper">
+    <div class="tradingview-widget-container">
+        <div id="tradingview_chart" style="height: 550px;"></div>
+    </div>
+
+    <!-- Key Levels Sidebar -->
+    <div class="levels-sidebar">
+        <div class="levels-title">Key Levels</div>
+
+        {% if analysis.entry %}
+        <div class="level-group">
+            <div class="level-group-title">Trade Setup</div>
+            <div class="level-row entry-level">
+                <span>Entry</span><span>₹{{ "%.2f"|format(analysis.entry) }}</span>
+            </div>
+            <div class="level-row target-level">
+                <span>Target</span><span>₹{{ "%.2f"|format(analysis.target) }}</span>
+            </div>
+            <div class="level-row sl-level">
+                <span>Stop Loss</span><span>₹{{ "%.2f"|format(analysis.stop_loss) }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if analysis.cpr and analysis.cpr.pivot %}
+        <div class="level-group">
+            <div class="level-group-title">CPR / Pivots</div>
+            <div class="level-row" style="color: var(--red-light)"><span>R3</span><span>₹{{ analysis.cpr.r3 }}</span></div>
+            <div class="level-row" style="color: var(--red)"><span>R2</span><span>₹{{ analysis.cpr.r2 }}</span></div>
+            <div class="level-row" style="color: var(--red)"><span>R1</span><span>₹{{ analysis.cpr.r1 }}</span></div>
+            <div class="level-row" style="color: var(--orange)"><span>TC</span><span>₹{{ analysis.cpr.tc }}</span></div>
+            <div class="level-row active"><span>Pivot</span><span>₹{{ analysis.cpr.pivot }}</span></div>
+            <div class="level-row" style="color: var(--orange)"><span>BC</span><span>₹{{ analysis.cpr.bc }}</span></div>
+            <div class="level-row" style="color: var(--green)"><span>S1</span><span>₹{{ analysis.cpr.s1 }}</span></div>
+            <div class="level-row" style="color: var(--green)"><span>S2</span><span>₹{{ analysis.cpr.s2 }}</span></div>
+            <div class="level-row" style="color: var(--green-light)"><span>S3</span><span>₹{{ analysis.cpr.s3 }}</span></div>
+            {% if analysis.cpr.narrow_cpr %}
+            <div style="font-size: 10px; color: var(--orange); margin-top: 6px; font-weight: 700;">NARROW CPR — Expecting big move</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if analysis.fibonacci and analysis.fibonacci.levels %}
+        <div class="level-group">
+            <div class="level-group-title">Fibonacci ({{ analysis.fibonacci.trend }})</div>
+            {% for level, price in analysis.fibonacci.levels.items() %}
+            <div class="level-row {% if level == analysis.fibonacci.nearest_level %}active{% endif %}">
+                <span>{{ level }}</span><span>₹{{ "%.2f"|format(price) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if analysis.supply_demand_zones %}
+        <div class="level-group">
+            <div class="level-group-title">Zones</div>
+            {% for zone in analysis.supply_demand_zones[:5] %}
+            <div class="level-row zone-{{ zone.type }}">
+                <span>{{ zone.type|title }} ({{ zone.touches }}t)</span>
+                <span>₹{{ zone.zone_bottom }}-{{ zone.zone_top }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if analysis.vwap and analysis.vwap.vwap %}
+        <div class="level-group">
+            <div class="level-group-title">VWAP</div>
+            <div class="level-row {% if analysis.vwap.near_vwap %}active{% endif %}">
+                <span>VWAP</span><span>₹{{ analysis.vwap.vwap }}</span>
+            </div>
+            <div class="level-row" style="color: var(--text-muted);">
+                <span>Distance</span><span>{{ analysis.vwap.distance_pct }}%</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if analysis.fibonacci_extensions and analysis.fibonacci_extensions.extensions %}
+        <div class="level-group">
+            <div class="level-group-title">Extensions</div>
+            {% for level, price in analysis.fibonacci_extensions.extensions.items() %}
+            <div class="level-row">
+                <span>{{ level }}</span><span>₹{{ "%.2f"|format(price) }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Analysis Details Grid -->
+<div class="analysis-grid">
+    <!-- Confluence Factors -->
+    {% if analysis.confluence_points %}
+    <div class="analysis-card">
+        <div class="card-title">Confluence Factors ({{ analysis.confluence_score }}/{{ analysis.max_confluence }})</div>
+        {% for point in analysis.confluence_points %}
+        <div class="confluence-item">
+            <span class="dot"></span>
+            {{ point }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Candlestick Patterns -->
+    {% if analysis.candlestick_patterns %}
+    <div class="analysis-card">
+        <div class="card-title">Candlestick Patterns</div>
+        {% for cp in analysis.candlestick_patterns %}
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if cp.type == 'bullish' %}var(--green){% elif cp.type == 'bearish' %}var(--red){% else %}var(--orange){% endif %};"></span>
+            <span>
+                <strong>{{ cp.pattern }}</strong>
+                <span style="color: var(--text-muted); font-size: 11px;">
+                    @ ₹{{ cp.price }} &middot; {{ cp.days_ago }}d ago &middot; {{ cp.strength }}
+                </span>
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Chart Patterns -->
+    {% if analysis.chart_patterns %}
+    <div class="analysis-card">
+        <div class="card-title">Chart Patterns</div>
+        {% for cp in analysis.chart_patterns %}
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if cp.type == 'bullish' %}var(--green){% elif cp.type == 'bearish' %}var(--red){% else %}var(--orange){% endif %};"></span>
+            <span>
+                <strong>{{ cp.pattern }}</strong>
+                <span style="color: var(--text-muted); font-size: 11px;">
+                    {{ cp.strength }}
+                    {% if cp.impulse_pct %}&middot; Impulse: {{ cp.impulse_pct }}%{% endif %}
+                    {% if cp.level %}&middot; Level: ₹{{ cp.level }}{% endif %}
+                </span>
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Multi-Timeframe -->
+    {% if analysis.multi_timeframe and analysis.multi_timeframe.weekly_trend != 'UNKNOWN' %}
+    <div class="analysis-card">
+        <div class="card-title">Multi-Timeframe</div>
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if analysis.multi_timeframe.weekly_trend == 'BULLISH' %}var(--green){% elif analysis.multi_timeframe.weekly_trend == 'BEARISH' %}var(--red){% else %}var(--orange){% endif %};"></span>
+            Weekly: <strong>{{ analysis.multi_timeframe.weekly_trend }}</strong>
+            <span style="color: var(--text-muted); font-size: 11px;">(EMA8: ₹{{ analysis.multi_timeframe.weekly_ema8 }} | EMA21: ₹{{ analysis.multi_timeframe.weekly_ema21 }})</span>
+        </div>
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if analysis.multi_timeframe.daily_trend == 'BULLISH' %}var(--green){% elif analysis.multi_timeframe.daily_trend == 'BEARISH' %}var(--red){% else %}var(--orange){% endif %};"></span>
+            Daily: <strong>{{ analysis.multi_timeframe.daily_trend }}</strong>
+            <span style="color: var(--text-muted); font-size: 11px;">(EMA9: ₹{{ analysis.multi_timeframe.daily_ema9 }} | EMA21: ₹{{ analysis.multi_timeframe.daily_ema21 }})</span>
+        </div>
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if analysis.multi_timeframe.alignment == 'ALIGNED' %}var(--green){% elif analysis.multi_timeframe.alignment == 'DIVERGENT' %}var(--red){% else %}var(--orange){% endif %};"></span>
+            Alignment: <strong>{{ analysis.multi_timeframe.alignment }}</strong>
+        </div>
+        {% if analysis.multi_timeframe.weekly_rsi %}
+        <div class="confluence-item">
+            <span class="dot"></span>
+            Weekly RSI: <strong>{{ analysis.multi_timeframe.weekly_rsi }}</strong>
+        </div>
+        {% endif %}
+        {% if analysis.multi_timeframe.weekly_higher_lows %}
+        <div class="confluence-item">
+            <span class="dot" style="background: var(--green);"></span>
+            Weekly Higher Lows forming
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Relative Strength -->
+    {% if analysis.relative_strength and analysis.relative_strength.rs_trend not in ('N/A', None) %}
+    <div class="analysis-card">
+        <div class="card-title">Relative Strength vs Nifty</div>
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if analysis.relative_strength.rs_trend == 'OUTPERFORMING' %}var(--green){% else %}var(--red){% endif %};"></span>
+            <strong>{{ analysis.relative_strength.rs_trend }}</strong>
+            <span style="color: var(--text-muted); font-size: 11px;">(RS Percentile: {{ analysis.relative_strength.rs_percentile }}%)</span>
+        </div>
+        {% if analysis.relative_strength.stock_1m_return is defined %}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; font-size: 12px;">
+            <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px;">
+                <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">1M Return</div>
+                <div style="font-family: 'JetBrains Mono', monospace; margin-top: 4px;">
+                    Stock: <span class="{% if analysis.relative_strength.stock_1m_return > 0 %}pnl-positive{% else %}pnl-negative{% endif %}">{{ "%+.1f"|format(analysis.relative_strength.stock_1m_return) }}%</span><br>
+                    Nifty: <span>{{ "%+.1f"|format(analysis.relative_strength.nifty_1m_return) }}%</span>
+                </div>
+            </div>
+            <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px;">
+                <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">3M Return</div>
+                <div style="font-family: 'JetBrains Mono', monospace; margin-top: 4px;">
+                    Stock: <span class="{% if analysis.relative_strength.stock_3m_return > 0 %}pnl-positive{% else %}pnl-negative{% endif %}">{{ "%+.1f"|format(analysis.relative_strength.stock_3m_return) }}%</span><br>
+                    Nifty: <span>{{ "%+.1f"|format(analysis.relative_strength.nifty_3m_return) }}%</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Trendlines -->
+    {% if analysis.trendlines %}
+    <div class="analysis-card">
+        <div class="card-title">Trendlines</div>
+        {% for tl in analysis.trendlines %}
+        <div class="trendline-item">
+            <div class="tl-type">{{ tl.type|replace('_', ' ')|title }}</div>
+            <div class="tl-detail">
+                ₹{{ tl.start_price }} → ₹{{ tl.end_price }} | {{ tl.touches }} touches
+            </div>
+            <div class="tl-meta">
+                Current level: ₹{{ tl.current_tl_price }} |
+                Distance: <span class="{% if tl.near_trendline %}pnl-positive{% endif %}">{{ tl.distance_pct }}%</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Gaps -->
+    {% if analysis.gaps %}
+    <div class="analysis-card">
+        <div class="card-title">Recent Gaps</div>
+        {% for gap in analysis.gaps %}
+        <div class="confluence-item">
+            <span class="dot" style="background: {% if gap.type == 'GAP_UP' %}var(--green){% else %}var(--red){% endif %};"></span>
+            <span>
+                <strong>{{ gap.type|replace('_', ' ') }}</strong> {{ gap.gap_pct }}%
+                <span style="color: var(--text-muted); font-size: 11px;">
+                    @ ₹{{ gap.open_price }} on {{ gap.date }} &middot;
+                    {% if gap.filled %}Filled{% else %}Unfilled{% endif %}
+                </span>
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not analysis.confluence_points and not analysis.trendlines %}
+    <div class="analysis-card">
+        <div class="card-title">Analysis</div>
+        <p style="color: var(--text-muted); font-size: 13px;">No strong confluence or trendlines detected at current levels.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- TradingView Widget Script -->
+<script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+<script type="text/javascript">
+    new TradingView.widget({
+        "autosize": true,
+        "symbol": "NSE:{{ symbol }}",
+        "interval": "{{ interval or 'D' }}",
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#111928",
+        "enable_publishing": false,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "details": true,
+        "hotlist": false,
+        "calendar": false,
+        "studies": ["MAExp@tv-basicstudies", "RSI@tv-basicstudies", "MACD@tv-basicstudies"],
+        "container_id": "tradingview_chart",
+        "backgroundColor": "#111928",
+        "gridColor": "#1e293b",
+    });
+</script>
+{% endif %}
+
+{% if not analysis and not error %}
+<div class="empty-state">
+    <div class="icon">📊</div>
+    <p>Enter an NSE stock symbol above to get full technical analysis with Fibonacci levels, supply/demand zones, candlestick patterns, multi-timeframe confluence, relative strength, CPR pivots, VWAP, and auto paper trading.</p>
+    <div class="quick-picks">
+        <span class="qp-label">Quick picks:</span>
+        <a href="/analysis?symbol=RELIANCE" class="qp-chip">RELIANCE</a>
+        <a href="/analysis?symbol=HDFCBANK" class="qp-chip">HDFCBANK</a>
+        <a href="/analysis?symbol=TCS" class="qp-chip">TCS</a>
+        <a href="/analysis?symbol=INFY" class="qp-chip">INFY</a>
+        <a href="/analysis?symbol=KOTAKBANK" class="qp-chip">KOTAKBANK</a>
+        <a href="/analysis?symbol=ICICIBANK" class="qp-chip">ICICIBANK</a>
+        <a href="/analysis?symbol=SBIN" class="qp-chip">SBIN</a>
+        <a href="/analysis?symbol=TATAMOTORS" class="qp-chip">TATAMOTORS</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

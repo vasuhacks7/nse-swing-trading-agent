@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% set active = "paper" %}
+{% block title %}Paper Trading{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">Paper Trading Portfolio</div>
+    <div class="page-subtitle">Virtual ₹10L portfolio with auto-trading based on confluence analysis</div>
+</div>
+
+<!-- Portfolio Summary -->
+<div class="metrics">
+    <div class="metric-card">
+        <div class="label">Starting Capital</div>
+        <div class="value">₹{{ "{:,.0f}".format(portfolio.starting_capital) }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Cash Available</div>
+        <div class="value blue">₹{{ "{:,.0f}".format(portfolio.cash) }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Invested</div>
+        <div class="value">₹{{ "{:,.0f}".format(portfolio.invested_value) }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Total Value</div>
+        <div class="value {% if portfolio.total_pnl >= 0 %}green{% else %}red{% endif %}">
+            ₹{{ "{:,.0f}".format(portfolio.total_value) }}
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Total P&L</div>
+        <div class="value {% if portfolio.total_pnl >= 0 %}green{% else %}red{% endif %}">
+            {{ "%+.2f"|format(portfolio.total_pnl_pct) }}%
+        </div>
+    </div>
+    <div class="metric-card">
+        <div class="label">Win Rate</div>
+        <div class="value {% if portfolio.win_rate >= 50 %}green{% elif portfolio.win_rate > 0 %}red{% else %}blue{% endif %}">
+            {{ portfolio.win_rate }}%
+            <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">
+                ({{ portfolio.wins }}W / {{ portfolio.losses }}L)
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Open Positions -->
+{% if portfolio.open_positions %}
+<div class="section">
+    <div class="section-title">
+        Open Positions
+        <span class="badge">{{ portfolio.open_positions|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Symbol</th>
+                    <th>Qty</th>
+                    <th>Entry</th>
+                    <th>Target</th>
+                    <th>Stop Loss</th>
+                    <th>R:R</th>
+                    <th>Invested</th>
+                    <th>Signal</th>
+                    <th>Confluence</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in portfolio.open_positions %}
+                <tr>
+                    <td>{{ p.date }}</td>
+                    <td>
+                        <a href="/analysis?symbol={{ p.symbol|replace('.NS', '') }}">
+                            <strong>{{ p.symbol|replace('.NS', '') }}</strong>
+                        </a>
+                    </td>
+                    <td>{{ p.qty }}</td>
+                    <td style="color: var(--accent)">₹{{ "%.2f"|format(p.entry_price) }}</td>
+                    <td style="color: var(--green-light)">₹{{ "%.2f"|format(p.target_price or 0) }}</td>
+                    <td style="color: var(--red-light)">₹{{ "%.2f"|format(p.stop_loss or 0) }}</td>
+                    <td style="color: var(--orange)">1:{{ "%.1f"|format(p.risk_reward or 0) }}</td>
+                    <td>₹{{ "{:,.0f}".format(p.invested) }}</td>
+                    <td><span class="signal-tag {{ p.signal|lower if p.signal else '' }}">{{ p.signal or '—' }}</span></td>
+                    <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">{{ p.confluence_score }}/7</td>
+                    <td>
+                        <a href="/analysis?symbol={{ p.symbol|replace('.NS', '') }}" class="view-link">Chart</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Closed Trades -->
+{% if closed_trades %}
+<div class="section">
+    <div class="section-title">
+        Closed Trades
+        <span class="badge">{{ closed_trades|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Entry Date</th>
+                    <th>Symbol</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>P&L %</th>
+                    <th>P&L ₹</th>
+                    <th>Days</th>
+                    <th>Exit Reason</th>
+                    <th>Signal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in closed_trades %}
+                <tr>
+                    <td>{{ t.date }}</td>
+                    <td>
+                        <a href="/analysis?symbol={{ t.symbol|replace('.NS', '') }}">
+                            <strong>{{ t.symbol|replace('.NS', '') }}</strong>
+                        </a>
+                    </td>
+                    <td>₹{{ "%.2f"|format(t.entry_price) }}</td>
+                    <td>₹{{ "%.2f"|format(t.exit_price or 0) }}</td>
+                    <td>
+                        <span class="{% if t.pnl_pct > 0 %}pnl-positive{% else %}pnl-negative{% endif %}">
+                            {{ "%+.2f"|format(t.pnl_pct or 0) }}%
+                        </span>
+                    </td>
+                    <td>
+                        <span class="{% if t.pnl_amount > 0 %}pnl-positive{% else %}pnl-negative{% endif %}">
+                            {{ "%+,.0f"|format(t.pnl_amount or 0) }}
+                        </span>
+                    </td>
+                    <td>{{ t.holding_days or '—' }}d</td>
+                    <td>{{ t.exit_reason or '—' }}</td>
+                    <td><span class="signal-tag {{ t.signal|lower if t.signal else '' }}">{{ t.signal or '—' }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if not portfolio.open_positions and not closed_trades %}
+<div class="empty-state">
+    <div class="icon">💰</div>
+    <p>No paper trades yet. Go to <a href="/analysis">Analysis</a> to analyze a stock — trades are executed automatically when confluence is strong.</p>
+</div>
+{% endif %}
+{% endblock %}

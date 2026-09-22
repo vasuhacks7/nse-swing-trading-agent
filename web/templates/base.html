@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Trading Agent{% endblock %} — NSE Swing Trading</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <div class="logo">
+                <div class="logo-icon">📈</div>
+                <span>NSE</span> SwingAgent
+            </div>
+            <div class="links">
+                <a href="/" class="{% if active == 'dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="/analysis" class="{% if active == 'analysis' %}active{% endif %}">Analysis</a>
+                <a href="/paper-trading" class="{% if active == 'paper' %}active{% endif %}">Paper Trading</a>
+                <a href="/history" class="{% if active == 'history' %}active{% endif %}">History</a>
+                <a href="/scoreboard" class="{% if active == 'scoreboard' %}active{% endif %}">Scoreboard</a>
+                <a href="/premium-picks" class="{% if active == 'premium' %}active{% endif %}">Premium Picks</a>
+            </div>
+            <a href="/generate" class="generate-btn">Generate Alerts</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="container">
+            Self-Improving Trading Agent &middot; AI-Powered NSE Analysis &middot; Not financial advice
+        </div>
+    </footer>
+</body>
+</html>
