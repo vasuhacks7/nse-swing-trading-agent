@@ -914,12 +914,121 @@ def detect_confluence(df: pd.DataFrame, fundamentals: dict = None) -> dict:
     }
 
 
+def _build_swing_verdict(analysis: dict, df: pd.DataFrame) -> dict:
+    signal = analysis["signal"]
+    score = analysis["confluence_score"]
+    max_score = analysis["max_confluence"]
+    entry = analysis.get("entry")
+    target = analysis.get("target")
+    stop_loss = analysis.get("stop_loss")
+    cmp = analysis.get("current_price", 0)
+    mtf = analysis.get("multi_timeframe", {})
+    rs = analysis.get("relative_strength", {})
+    candles = analysis.get("candlestick_patterns", [])
+    chart_pats = analysis.get("chart_patterns", [])
+
+    rsi = float(df["rsi"].iloc[-1]) if "rsi" in df.columns and not np.isnan(df["rsi"].iloc[-1]) else None
+    adx = float(df["adx"].iloc[-1]) if "adx" in df.columns and not np.isnan(df["adx"].iloc[-1]) else None
+
+    verdict = {"action": "IGNORE", "color": "#6b7280", "icon": "—"}
+    reasons = []
+    risks = []
+    plan = []
+
+    if signal in ("STRONG_BUY", "BUY") and entry and target and stop_loss:
+        risk_pct = round((entry - stop_loss) / entry * 100, 1)
+        reward_pct = round((target - entry) / entry * 100, 1)
+        rr = round(reward_pct / risk_pct, 1) if risk_pct > 0 else 0
+
+        if signal == "STRONG_BUY":
+            verdict = {"action": "BUY", "color": "#22c55e", "icon": "BUY"}
+        else:
+            verdict = {"action": "BUY", "color": "#3b82f6", "icon": "BUY"}
+
+        reasons.append(f"{score}/{max_score} confluence factors aligned")
+        if mtf.get("alignment") == "ALIGNED" and mtf.get("weekly_trend") == "BULLISH":
+            reasons.append("Weekly and daily trends both bullish")
+        if rs.get("rs_trend") == "OUTPERFORMING":
+            reasons.append(f"Outperforming Nifty 50 (top {100 - rs.get('rs_percentile', 50):.0f}%)")
+        bullish_candles = [p for p in candles if p["type"] == "bullish" and p["days_ago"] <= 2]
+        if bullish_candles:
+            reasons.append(f"Bullish candle pattern: {bullish_candles[0]['pattern']}")
+        bullish_chart = [p for p in chart_pats if p.get("type") == "bullish"]
+        if bullish_chart:
+            reasons.append(f"Chart pattern: {bullish_chart[0]['pattern']}")
+
+        plan.append(f"Entry: ₹{entry:.2f} (current price)")
+        plan.append(f"Stop Loss: ₹{stop_loss:.2f} (risk: {risk_pct}%)")
+        plan.append(f"Target: ₹{target:.2f} (reward: {reward_pct}%)")
+        plan.append(f"Risk:Reward = 1:{rr}")
+        plan.append("Deploy 50% now, add 50% on confirmation")
+        plan.append("Hold period: 1-4 weeks")
+
+        if rsi and rsi > 75:
+            risks.append(f"RSI is overbought ({rsi:.0f}) — momentum may fade")
+        if rsi and rsi > 85:
+            risks.append("Extremely overbought — high chance of pullback")
+        if mtf.get("weekly_rsi") and float(mtf["weekly_rsi"]) > 80:
+            risks.append(f"Weekly RSI overbought ({mtf['weekly_rsi']}) — late stage rally")
+        if rs.get("stock_1m_return") and float(rs["stock_1m_return"]) > 30:
+            risks.append(f"Already up {rs['stock_1m_return']:.0f}% in 1 month — chasing risk")
+
+        verdict["risk_pct"] = risk_pct
+        verdict["reward_pct"] = reward_pct
+        verdict["rr"] = rr
+
+    elif signal == "WATCH":
+        verdict = {"action": "WATCH", "color": "#eab308", "icon": "WATCH"}
+        reasons.append(f"{score}/{max_score} confluence — needs more alignment")
+        if mtf.get("weekly_trend") == "BULLISH":
+            reasons.append("Weekly trend is bullish — structure is favorable")
+        if rs.get("rs_trend") == "OUTPERFORMING":
+            reasons.append("Stock is outperforming the market")
+
+        plan.append("Add to watchlist — don't buy yet")
+        plan.append("Wait for: pullback to support/demand zone, or breakout with volume")
+        if analysis.get("supply_demand_zones"):
+            demand = [z for z in analysis["supply_demand_zones"] if z["type"] == "demand" and not z.get("broken")]
+            if demand:
+                plan.append(f"Key demand zone: ₹{demand[0]['zone_bottom']}-₹{demand[0]['zone_top']}")
+
+        if rsi and rsi > 70:
+            risks.append(f"RSI overbought ({rsi:.0f}) — wait for cooling")
+
+    elif signal in ("SELL", "STRONG_SELL"):
+        verdict = {"action": "AVOID", "color": "#ef4444", "icon": "AVOID"}
+        reasons.append("Bearish confluence detected — selling pressure")
+        if mtf.get("weekly_trend") == "BEARISH":
+            reasons.append("Weekly trend is bearish")
+        if rs.get("rs_trend") == "UNDERPERFORMING":
+            reasons.append("Underperforming the broader market")
+        plan.append("Do not buy — bearish setup")
+        plan.append("If holding, consider trailing stop or exit on bounce")
+
+    else:
+        verdict = {"action": "NO SETUP", "color": "#6b7280", "icon": "SKIP"}
+        reasons.append(f"Only {score}/{max_score} confluence — no clear edge")
+        if mtf.get("weekly_trend") == "SIDEWAYS":
+            reasons.append("Sideways trend — no directional bias")
+        plan.append("Skip this stock for now")
+        plan.append("Re-check if price reaches a key support/demand zone")
+
+    if not risks:
+        risks.append("Always use a stop loss — never risk more than 2-3% of capital per trade")
+
+    verdict["reasons"] = reasons
+    verdict["risks"] = risks
+    verdict["plan"] = plan
+    return verdict
+
+
 def full_analysis(df: pd.DataFrame, fundamentals: dict = None) -> dict:
     from data.preprocessor import Preprocessor
     df = df.dropna(subset=["close"])
     df_ind = Preprocessor.add_indicators(df)
 
     analysis = detect_confluence(df_ind, fundamentals)
+    analysis["swing_verdict"] = _build_swing_verdict(analysis, df_ind)
     analysis["ohlcv_json"] = _df_to_chart_json(df)
 
     return analysis

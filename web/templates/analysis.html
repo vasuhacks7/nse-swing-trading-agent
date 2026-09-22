@@ -116,6 +116,47 @@
     </div>
 </div>
 
+<!-- Swing Verdict -->
+{% if analysis.swing_verdict %}
+<div style="background: linear-gradient(135deg, rgba(17,25,40,0.95), rgba(30,41,59,0.95)); border: 1px solid {{ analysis.swing_verdict.color }}44; border-left: 4px solid {{ analysis.swing_verdict.color }}; border-radius: 12px; padding: 24px; margin-bottom: 16px;">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <span style="background: {{ analysis.swing_verdict.color }}; color: #fff; font-weight: 800; font-size: 14px; padding: 6px 16px; border-radius: 6px; letter-spacing: 1px;">{{ analysis.swing_verdict.action }}</span>
+        <span style="color: #e2e8f0; font-size: 18px; font-weight: 700;">Swing Trade Verdict</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div>
+            <div style="color: {{ analysis.swing_verdict.color }}; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;">Why</div>
+            {% for reason in analysis.swing_verdict.reasons %}
+            <div style="color: #cbd5e1; font-size: 13px; padding: 4px 0; display: flex; align-items: start; gap: 8px;">
+                <span style="color: {{ analysis.swing_verdict.color }}; margin-top: 2px;">&#x2022;</span> {{ reason }}
+            </div>
+            {% endfor %}
+        </div>
+
+        <div>
+            <div style="color: #3b82f6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;">Trade Plan</div>
+            {% for step in analysis.swing_verdict.plan %}
+            <div style="color: #cbd5e1; font-size: 13px; padding: 4px 0; display: flex; align-items: start; gap: 8px;">
+                <span style="color: #3b82f6; margin-top: 2px;">&#x2022;</span> {{ step }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if analysis.swing_verdict.risks %}
+    <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #334155;">
+        <div style="color: #f97316; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;">Risks to Watch</div>
+        {% for risk in analysis.swing_verdict.risks %}
+        <div style="color: #fdba74; font-size: 13px; padding: 3px 0; display: flex; align-items: start; gap: 8px;">
+            <span style="margin-top: 2px;">&#x26A0;</span> {{ risk }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Trade Action -->
 {% if analysis.trade_action == "BOUGHT" %}
 <div class="trade-action bought">
