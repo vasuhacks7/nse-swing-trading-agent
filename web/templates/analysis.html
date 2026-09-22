@@ -496,6 +496,51 @@
     {% endfor %}
     {% endif %}
 
+    {% if analysis and analysis.trendlines %}
+    var tlColors = {'ascending_support': '#22c55e', 'descending_resistance': '#ef4444'};
+    {% for tl in analysis.trendlines[:3] %}
+    (function() {
+        var startTime = Math.floor(new Date('{{ tl.start_date }}').getTime() / 1000);
+        var endTime = Math.floor(new Date('{{ tl.end_date }}').getTime() / 1000);
+        var lastTime = chartData[chartData.length - 1].time;
+        var startPrice = {{ tl.start_price }};
+        var endPrice = {{ tl.end_price }};
+        var daysBetween = (endTime - startTime) / 86400;
+        if (daysBetween <= 0) return;
+        var slopePerSec = (endPrice - startPrice) / (endTime - startTime);
+        var extendedPrice = endPrice + slopePerSec * (lastTime - endTime);
+
+        var tlSeries = chart.addLineSeries({
+            color: tlColors['{{ tl.type }}'] || '#6b7280',
+            lineWidth: 2,
+            lineStyle: 0,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+        });
+
+        var points = [{time: startTime, value: startPrice}, {time: endTime, value: endPrice}];
+        if (lastTime > endTime) points.push({time: lastTime, value: Math.max(extendedPrice, 0)});
+        points.sort(function(a,b){return a.time - b.time;});
+        try { tlSeries.setData(points); } catch(e) {}
+    })();
+    {% endfor %}
+    {% endif %}
+
+    {% if analysis and analysis.supply_demand_zones %}
+    {% for zone in analysis.supply_demand_zones[:4] %}
+    {% if not zone.broken %}
+    (function() {
+        var zoneColor = '{{ zone.type }}' === 'demand' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)';
+        var borderColor = '{{ zone.type }}' === 'demand' ? '#22c55e' : '#ef4444';
+        var label = '{{ zone.type }}' === 'demand' ? 'Demand' : 'Supply';
+        candleSeries.createPriceLine({ price: {{ zone.zone_top }}, color: borderColor, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: '' });
+        candleSeries.createPriceLine({ price: {{ zone.zone_bottom }}, color: borderColor, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: label + ' ({{ zone.touches }}t)' });
+    })();
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
     chart.timeScale().fitContent();
     window.addEventListener('resize', function() { chart.applyOptions({ width: container.clientWidth }); });
 })();
