@@ -22,6 +22,7 @@ from data.advanced_analysis import full_analysis
 from agent.paper_trader import PaperTrader
 from data.apoorv_tracker import ApoorvTracker
 from agent.apoorv_learner import ApoorvLearner
+from data.nse_universe import fetch_all_nse_symbols, _try_fetch_equity_list, _CACHE_FILE
 import numpy as np
 
 logging.basicConfig(level=logging.INFO,
@@ -41,6 +42,53 @@ improvement_engine = ImprovementEngine(settings)
 paper_trader = PaperTrader(settings)
 apoorv_tracker = ApoorvTracker(settings)
 apoorv_learner = ApoorvLearner(settings)
+
+_symbol_lookup: list[dict] = []
+
+
+def _load_symbol_lookup() -> list[dict]:
+    global _symbol_lookup
+    if _symbol_lookup:
+        return _symbol_lookup
+    try:
+        import io, requests, pandas as pd
+        NSE_CSV_URL = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if _CACHE_FILE.exists():
+            cached_df = pd.read_csv(_CACHE_FILE)
+            symbols = cached_df["symbol"].str.replace(".NS", "", regex=False).tolist()
+            _symbol_lookup = [{"symbol": s, "name": s} for s in symbols]
+            return _symbol_lookup
+        resp = requests.get(NSE_CSV_URL, headers=headers, timeout=15)
+        resp.raise_for_status()
+        df = pd.read_csv(io.StringIO(resp.text))
+        name_col = None
+        for c in df.columns:
+            if "name" in c.lower() or "company" in c.lower():
+                name_col = c
+                break
+        sym_col = None
+        for c in df.columns:
+            if c.strip().lower() in ("symbol", "ticker"):
+                sym_col = c
+                break
+        if not sym_col:
+            sym_col = df.columns[0]
+        if name_col:
+            _symbol_lookup = [
+                {"symbol": row[sym_col].strip(), "name": row[name_col].strip()}
+                for _, row in df.iterrows() if pd.notna(row[sym_col])
+            ]
+        else:
+            _symbol_lookup = [
+                {"symbol": row[sym_col].strip(), "name": row[sym_col].strip()}
+                for _, row in df.iterrows() if pd.notna(row[sym_col])
+            ]
+    except Exception as e:
+        logger.warning(f"Symbol lookup load failed: {e}")
+        _symbol_lookup = [{"symbol": s.replace(".NS", ""), "name": s.replace(".NS", "")}
+                          for s in (fetch_all_nse_symbols() or [])]
+    return _symbol_lookup
 
 
 def _render(request: Request, template: str, context: dict):
@@ -308,6 +356,21 @@ async def api_scoreboard():
 async def api_open_positions():
     open_alerts = alert_engine.store.get_open_alerts()
     return {"positions": open_alerts.to_dict("records") if not open_alerts.empty else []}
+
+
+@app.get("/api/search-symbols")
+async def api_search_symbols(q: str = ""):
+    q = q.strip().upper()
+    if len(q) < 1:
+        return []
+    lookup = _load_symbol_lookup()
+    results = []
+    for item in lookup:
+        if q in item["symbol"].upper() or q in item["name"].upper():
+            results.append(item)
+            if len(results) >= 15:
+                break
+    return results
 
 
 if __name__ == "__main__":

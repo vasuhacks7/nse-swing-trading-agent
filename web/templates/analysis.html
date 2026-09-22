@@ -8,9 +8,12 @@
     <div class="page-subtitle">Fibonacci, supply/demand zones, candlestick patterns, multi-timeframe confluence & auto paper trading</div>
 </div>
 
-<form class="analyze-form" id="analyzeForm" action="/analysis" method="get">
-    <input type="text" name="symbol" id="symbolInput" placeholder="Enter NSE symbol (e.g. RELIANCE, TCS, HDFCBANK)"
-           value="{{ symbol or '' }}" autocomplete="off">
+<form class="analyze-form" id="analyzeForm" action="/analysis" method="get" style="position: relative;">
+    <div style="position: relative; flex: 1;">
+        <input type="text" name="symbol" id="symbolInput" placeholder="Search stock name or symbol (e.g. Reliance, TCS, SBIN)"
+               value="{{ symbol or '' }}" autocomplete="off">
+        <div id="searchDropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#1e293b; border:1px solid #334155; border-radius:8px; max-height:300px; overflow-y:auto; z-index:100; margin-top:4px;"></div>
+    </div>
     <select name="interval" id="intervalSelect" class="interval-select">
         <option value="D" {% if interval == 'D' or not interval %}selected{% endif %}>Daily</option>
         <option value="W" {% if interval == 'W' %}selected{% endif %}>Weekly</option>
@@ -18,6 +21,48 @@
     </select>
     <button type="submit" class="generate-btn">Analyze</button>
 </form>
+<script>
+(function() {
+    var input = document.getElementById('symbolInput');
+    var dropdown = document.getElementById('searchDropdown');
+    var debounceTimer;
+
+    input.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        var q = input.value.trim();
+        if (q.length < 1) { dropdown.style.display = 'none'; return; }
+        debounceTimer = setTimeout(function() {
+            fetch('/api/search-symbols?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.length) { dropdown.style.display = 'none'; return; }
+                    dropdown.innerHTML = data.map(function(item) {
+                        return '<div style="padding:10px 14px; cursor:pointer; border-bottom:1px solid #334155; font-size:13px;" ' +
+                               'onmouseover="this.style.background=\'#334155\'" onmouseout="this.style.background=\'transparent\'" ' +
+                               'data-symbol="' + item.symbol + '">' +
+                               '<strong style="color:#e2e8f0;">' + item.symbol + '</strong>' +
+                               (item.name !== item.symbol ? '<span style="color:#9ca3af; margin-left:8px;">' + item.name + '</span>' : '') +
+                               '</div>';
+                    }).join('');
+                    dropdown.style.display = 'block';
+                    dropdown.querySelectorAll('[data-symbol]').forEach(function(el) {
+                        el.addEventListener('click', function() {
+                            input.value = el.getAttribute('data-symbol');
+                            dropdown.style.display = 'none';
+                            document.getElementById('analyzeForm').submit();
+                        });
+                    });
+                });
+        }, 250);
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+    });
+})();
+</script>
 
 {% if error %}
 <div class="empty-state" style="padding: 30px;">
