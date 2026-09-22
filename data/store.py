@@ -105,6 +105,147 @@ class DataStore:
                 );
             """)
 
+    def init_scanner(self):
+        with self._conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS scanner_picks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_date TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    signal TEXT NOT NULL,
+                    confluence_score INTEGER DEFAULT 0,
+                    entry_price REAL,
+                    target_price REAL,
+                    stop_loss REAL,
+                    confluence_factors TEXT,
+                    weekly_trend TEXT,
+                    rs_trend TEXT,
+                    status TEXT DEFAULT 'OPEN',
+                    outcome TEXT,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    pnl_pct REAL,
+                    max_price REAL,
+                    min_price REAL,
+                    days_tracked INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS scanner_factor_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    factor TEXT NOT NULL UNIQUE,
+                    total_picks INTEGER DEFAULT 0,
+                    winning_picks INTEGER DEFAULT 0,
+                    losing_picks INTEGER DEFAULT 0,
+                    avg_return_pct REAL DEFAULT 0,
+                    win_rate REAL DEFAULT 0,
+                    weight REAL DEFAULT 1.0,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS scanner_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+    def save_scanner_pick(self, pick: dict) -> int:
+        self.init_scanner()
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM scanner_picks WHERE scan_date=? AND symbol=? AND status='OPEN'",
+                (pick["scan_date"], pick["symbol"])
+            ).fetchone()
+            if existing:
+                return existing[0]
+
+            cursor = conn.execute(
+                """INSERT INTO scanner_picks
+                   (scan_date, symbol, signal, confluence_score, entry_price,
+                    target_price, stop_loss, confluence_factors, weekly_trend,
+                    rs_trend, max_price, min_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pick["scan_date"], pick["symbol"], pick["signal"],
+                 pick.get("confluence_score", 0), pick.get("entry_price"),
+                 pick.get("target_price"), pick.get("stop_loss"),
+                 pick.get("confluence_factors", ""),
+                 pick.get("weekly_trend", ""), pick.get("rs_trend", ""),
+                 pick.get("entry_price"), pick.get("entry_price")),
+            )
+            return cursor.lastrowid
+
+    def get_open_scanner_picks(self) -> list[dict]:
+        self.init_scanner()
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM scanner_picks WHERE status='OPEN' ORDER BY scan_date DESC")
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def close_scanner_pick(self, pick_id: int, result: dict):
+        with self._conn() as conn:
+            conn.execute(
+                """UPDATE scanner_picks SET status='CLOSED', outcome=?,
+                   exit_price=?, exit_date=?, pnl_pct=?, max_price=?,
+                   min_price=?, days_tracked=? WHERE id=?""",
+                (result["outcome"], result["exit_price"], result["exit_date"],
+                 result["pnl_pct"], result.get("max_price"),
+                 result.get("min_price"), result.get("days_tracked", 0),
+                 pick_id),
+            )
+
+    def update_scanner_pick_prices(self, pick_id: int, max_price: float, min_price: float, days: int):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE scanner_picks SET max_price=?, min_price=?, days_tracked=? WHERE id=?",
+                (round(max_price, 2), round(min_price, 2), days, pick_id))
+
+    def get_closed_scanner_picks(self, limit: int = 500) -> list[dict]:
+        self.init_scanner()
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM scanner_picks WHERE status='CLOSED' ORDER BY exit_date DESC LIMIT ?",
+                (limit,))
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def save_scanner_factor_score(self, factor: str, stats: dict):
+        self.init_scanner()
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO scanner_factor_scores
+                   (factor, total_picks, winning_picks, losing_picks,
+                    avg_return_pct, win_rate, weight, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (factor, stats["total"], stats["wins"], stats["losses"],
+                 stats["avg_return"], stats["win_rate"], stats["weight"],
+                 datetime.now().isoformat()),
+            )
+
+    def get_scanner_factor_scores(self) -> list[dict]:
+        self.init_scanner()
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM scanner_factor_scores ORDER BY win_rate DESC")
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_scanner_config(self, key: str, default: str = "") -> str:
+        self.init_scanner()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM scanner_config WHERE key=?", (key,)
+            ).fetchone()
+            return row[0] if row else default
+
+    def set_scanner_config(self, key: str, value: str):
+        self.init_scanner()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO scanner_config (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, value, datetime.now().isoformat()))
+
     def init_paper_trading(self):
         with self._conn() as conn:
             conn.executescript("""

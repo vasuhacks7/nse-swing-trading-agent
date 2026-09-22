@@ -41,6 +41,14 @@
     </table>
 </div>
 
+<div id="perfSection" style="display: none; margin-bottom: 20px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px;" id="perfCards"></div>
+    <div id="factorTable" style="display: none;">
+        <div style="font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Factor Performance (Self-Learning)</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;" id="factorBody"></table>
+    </div>
+</div>
+
 <div id="emptyState" class="empty-state">
     <div class="icon">🔍</div>
     <p>Click <strong>Scan Now</strong> to scan top NSE stocks for swing trade setups.<br>
@@ -51,6 +59,50 @@
 <script>
 var allResults = [];
 var pollTimer = null;
+
+(function loadPerformance() {
+    fetch('/api/scanner/performance')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.total_picks) return;
+            document.getElementById('perfSection').style.display = 'block';
+
+            var cards = document.getElementById('perfCards');
+            var cardStyle = 'background: #1e293b; border-radius: 8px; padding: 14px;';
+            var labelStyle = 'color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;';
+            var valStyle = 'color: #e2e8f0; font-size: 22px; font-weight: 800; font-family: monospace; margin-top: 4px;';
+
+            var winColor = data.win_rate >= 0.5 ? '#22c55e' : '#ef4444';
+            var pnlColor = data.avg_pnl >= 0 ? '#22c55e' : '#ef4444';
+
+            cards.innerHTML =
+                '<div style="' + cardStyle + '"><div style="' + labelStyle + '">Total Picks Tracked</div><div style="' + valStyle + '">' + data.total_picks + '</div></div>' +
+                '<div style="' + cardStyle + '"><div style="' + labelStyle + '">Win Rate</div><div style="' + valStyle + 'color:' + winColor + ';">' + (data.win_rate * 100).toFixed(1) + '%</div></div>' +
+                '<div style="' + cardStyle + '"><div style="' + labelStyle + '">Avg Return</div><div style="' + valStyle + 'color:' + pnlColor + ';">' + (data.avg_pnl >= 0 ? '+' : '') + data.avg_pnl + '%</div></div>' +
+                '<div style="' + cardStyle + '"><div style="' + labelStyle + '">Min Confluence</div><div style="' + valStyle + '">' + data.min_confluence + '/12</div></div>';
+
+            if (data.factor_scores && data.factor_scores.length) {
+                document.getElementById('factorTable').style.display = 'block';
+                var ft = document.getElementById('factorBody');
+                ft.innerHTML = '<tr style="border-bottom: 1px solid #334155;">' +
+                    '<th style="padding: 6px 10px; text-align: left; color: #6b7280;">Factor</th>' +
+                    '<th style="padding: 6px 10px; color: #6b7280;">Picks</th>' +
+                    '<th style="padding: 6px 10px; color: #6b7280;">Win Rate</th>' +
+                    '<th style="padding: 6px 10px; color: #6b7280;">Avg Return</th>' +
+                    '<th style="padding: 6px 10px; color: #6b7280;">Weight</th></tr>' +
+                    data.factor_scores.map(function(f) {
+                        var wr = (f.win_rate * 100).toFixed(0);
+                        var wrColor = f.win_rate >= 0.55 ? '#22c55e' : f.win_rate <= 0.4 ? '#ef4444' : '#eab308';
+                        return '<tr style="border-bottom: 1px solid #1e293b;">' +
+                            '<td style="padding: 6px 10px; color: #e2e8f0;">' + f.factor.replace(/_/g, ' ') + '</td>' +
+                            '<td style="padding: 6px 10px; text-align: center;">' + f.total_picks + '</td>' +
+                            '<td style="padding: 6px 10px; text-align: center; color: ' + wrColor + '; font-weight: 700;">' + wr + '%</td>' +
+                            '<td style="padding: 6px 10px; text-align: center; font-family: monospace;">' + (f.avg_return_pct >= 0 ? '+' : '') + f.avg_return_pct + '%</td>' +
+                            '<td style="padding: 6px 10px; text-align: center; font-family: monospace;">' + f.weight + 'x</td></tr>';
+                    }).join('');
+            }
+        });
+})();
 
 function startScan() {
     var btn = document.getElementById('scanBtn');

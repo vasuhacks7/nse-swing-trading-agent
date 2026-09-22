@@ -13,6 +13,7 @@ from data.market_context import get_market_regime, get_fii_dii_activity
 from agent.paper_trader import PaperTrader
 from data.apoorv_tracker import ApoorvTracker
 from agent.apoorv_learner import ApoorvLearner
+from agent.scanner_learner import ScannerLearner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +28,7 @@ improvement_engine = ImprovementEngine(settings)
 paper_trader = PaperTrader(settings)
 apoorv_tracker = ApoorvTracker(settings)
 apoorv_learner = ApoorvLearner(settings)
+scanner_learner = ScannerLearner(settings)
 
 
 def job_generate_alerts():
@@ -89,6 +91,24 @@ def job_scan_apoorv():
         logger.error(f"Apoorv scan failed: {e}", exc_info=True)
 
 
+def job_scanner_track():
+    logger.info("=== SCHEDULED: Track scanner picks ===")
+    try:
+        result = scanner_learner.track_open_picks()
+        logger.info(f"Scanner tracking: {result}")
+    except Exception as e:
+        logger.error(f"Scanner tracking failed: {e}", exc_info=True)
+
+
+def job_scanner_learn():
+    logger.info("=== SCHEDULED: Scanner self-improvement ===")
+    try:
+        result = scanner_learner.learn_from_results()
+        logger.info(f"Scanner learning: {result}")
+    except Exception as e:
+        logger.error(f"Scanner learning failed: {e}", exc_info=True)
+
+
 def job_improvement():
     logger.info("=== SCHEDULED: Self-improvement cycle ===")
     try:
@@ -147,6 +167,22 @@ def main():
         CronTrigger(hour=9, minute=0, day_of_week="mon-fri"),
         id="scan_apoorv",
         name="Scan Apoorv's Telegram channel",
+    )
+
+    # 3:45 PM IST — track scanner picks after close
+    scheduler.add_job(
+        job_scanner_track,
+        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"),
+        id="scanner_track",
+        name="Track scanner picks",
+    )
+
+    # Saturday 9 AM — scanner self-improvement (learn from results)
+    scheduler.add_job(
+        job_scanner_learn,
+        CronTrigger(hour=9, minute=0, day_of_week="sat"),
+        id="scanner_learn",
+        name="Scanner self-improvement",
     )
 
     # Saturday 10 AM — weekly self-improvement

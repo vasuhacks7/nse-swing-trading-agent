@@ -23,6 +23,7 @@ from agent.paper_trader import PaperTrader
 from data.apoorv_tracker import ApoorvTracker
 from agent.apoorv_learner import ApoorvLearner
 from data.nse_universe import fetch_all_nse_symbols, _try_fetch_equity_list, _CACHE_FILE
+from agent.scanner_learner import ScannerLearner
 import numpy as np
 import pandas as pd
 
@@ -43,6 +44,7 @@ improvement_engine = ImprovementEngine(settings)
 paper_trader = PaperTrader(settings)
 apoorv_tracker = ApoorvTracker(settings)
 apoorv_learner = ApoorvLearner(settings)
+scanner_learner = ScannerLearner(settings)
 
 _symbol_lookup: list[dict] = []
 
@@ -467,6 +469,10 @@ def _run_full_scan():
     ))
     _scan_state["running"] = False
     _scan_state["done"] = True
+    try:
+        scanner_learner.save_scan_results(results)
+    except Exception as e:
+        logger.warning(f"Scanner learner save failed: {e}")
     logger.info(f"Scanner: done. {len(results)} signals found from {len(symbols)} stocks.")
 
 
@@ -493,6 +499,24 @@ async def api_scanner_reset():
     _scan_state["progress"] = 0
     _scan_state["total"] = 0
     return {"status": "reset"}
+
+
+@app.get("/api/scanner/track")
+async def api_scanner_track():
+    result = scanner_learner.track_open_picks()
+    return _sanitize(result)
+
+
+@app.get("/api/scanner/learn")
+async def api_scanner_learn():
+    result = scanner_learner.learn_from_results()
+    return _sanitize(result)
+
+
+@app.get("/api/scanner/performance")
+async def api_scanner_performance():
+    result = scanner_learner.get_performance_summary()
+    return _sanitize(result)
 
 
 if __name__ == "__main__":
