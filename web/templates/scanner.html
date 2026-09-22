@@ -45,37 +45,53 @@
     <div class="icon">🔍</div>
     <p>Click <strong>Scan Now</strong> to scan top NSE stocks for swing trade setups.<br>
     The scanner analyzes each stock for confluence of technical factors and shows actionable BUY/WATCH signals.</p>
-    <p style="color: #6b7280; font-size: 12px; margin-top: 8px;">Scans ~50 most liquid stocks. Takes 2-3 minutes.</p>
+    <p style="color: #6b7280; font-size: 12px; margin-top: 8px;">Scans all 2000+ NSE stocks in batches. Takes 5-10 minutes. Results appear live as batches complete.</p>
 </div>
 
 <script>
 var allResults = [];
+var pollTimer = null;
 
 function startScan() {
     var btn = document.getElementById('scanBtn');
     var status = document.getElementById('scanStatus');
     btn.disabled = true;
     btn.textContent = 'Scanning...';
-    status.textContent = 'Scanning top NSE stocks — this takes 2-3 minutes...';
+    status.textContent = 'Starting full NSE scan...';
     document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('resultsTable').style.display = 'none';
     allResults = [];
+
+    fetch('/api/scanner/reset').then(function() {
+        fetch('/api/scanner').then(function() {
+            pollProgress();
+        });
+    });
+}
+
+function pollProgress() {
+    if (pollTimer) clearTimeout(pollTimer);
 
     fetch('/api/scanner')
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            var btn = document.getElementById('scanBtn');
+            var status = document.getElementById('scanStatus');
             allResults = data.results || [];
-            btn.disabled = false;
-            btn.textContent = 'Scan Now';
+            var pct = data.total > 0 ? Math.round((data.scanned / data.total) * 100) : 0;
             var buyCount = allResults.filter(function(r) { return r.signal === 'BUY' || r.signal === 'STRONG_BUY'; }).length;
             var watchCount = allResults.filter(function(r) { return r.signal === 'WATCH'; }).length;
-            status.textContent = 'Found ' + buyCount + ' BUY and ' + watchCount + ' WATCH signals out of ' + data.scanned + ' stocks';
-            renderResults(allResults);
-        })
-        .catch(function(err) {
-            btn.disabled = false;
-            btn.textContent = 'Scan Now';
-            status.textContent = 'Scan failed: ' + err.message;
+
+            if (data.status === 'done') {
+                btn.disabled = false;
+                btn.textContent = 'Scan Again';
+                status.textContent = 'Done! Found ' + buyCount + ' BUY and ' + watchCount + ' WATCH signals from ' + data.scanned + ' stocks';
+                renderResults(allResults);
+            } else {
+                btn.textContent = 'Scanning ' + pct + '%...';
+                status.textContent = 'Scanned ' + data.scanned + '/' + data.total + ' stocks — ' + buyCount + ' BUY, ' + watchCount + ' WATCH found so far';
+                renderResults(allResults);
+                pollTimer = setTimeout(pollProgress, 3000);
+            }
         });
 }
 
