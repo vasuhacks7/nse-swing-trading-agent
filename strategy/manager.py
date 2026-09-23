@@ -5,6 +5,13 @@ from strategy.mean_reversion import MeanReversion
 from strategy.macd_rsi_confluence import MACDRSIConfluence
 from strategy.fundamental_value import FundamentalValue
 from strategy.trend_following import TrendFollowing
+from strategy.volatility_contraction import VolatilityContraction
+from strategy.fifty_two_week_high import FiftyTwoWeekHigh
+from strategy.relative_strength import RelativeStrength
+from strategy.inside_bar_breakout import InsideBarBreakout
+from strategy.gap_and_go import GapAndGo
+from strategy.bollinger_squeeze import BollingerSqueeze
+from strategy.vwap_bounce import VWAPBounce
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +21,13 @@ STRATEGY_CLASSES: dict[str, type[BaseStrategy]] = {
     "macd_rsi_confluence": MACDRSIConfluence,
     "fundamental_value": FundamentalValue,
     "trend_following": TrendFollowing,
+    "volatility_contraction": VolatilityContraction,
+    "52_week_high": FiftyTwoWeekHigh,
+    "relative_strength": RelativeStrength,
+    "inside_bar_breakout": InsideBarBreakout,
+    "gap_and_go": GapAndGo,
+    "bollinger_squeeze": BollingerSqueeze,
+    "vwap_bounce": VWAPBounce,
 }
 
 

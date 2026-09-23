@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% set active = "backtest" %}
+{% block title %}Backtest{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-title">Strategy Backtester</div>
+    <div class="page-subtitle">Replay historical data through all 5 strategies with trailing stops and quality gates</div>
+</div>
+
+<div style="background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+    <div style="display: flex; gap: 16px; align-items: end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-size: 11px; color: #9ca3af; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Start Date</label>
+            <input type="date" id="startDate" style="background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 13px;">
+        </div>
+        <div>
+            <label style="display: block; font-size: 11px; color: #9ca3af; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">End Date</label>
+            <input type="date" id="endDate" style="background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 13px;">
+        </div>
+        <div>
+            <label style="display: block; font-size: 11px; color: #9ca3af; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Universe Size</label>
+            <select id="universeSize" style="background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 13px;">
+                <option value="50">50 stocks (fast)</option>
+                <option value="100">100 stocks</option>
+                <option value="200" selected>200 stocks</option>
+                <option value="500">500 stocks (slow)</option>
+            </select>
+        </div>
+        <button id="runBtn" onclick="startBacktest()" class="generate-btn" style="font-size: 14px; padding: 8px 24px;">
+            Run Backtest
+        </button>
+    </div>
+    <div id="statusBar" style="margin-top: 12px; color: #9ca3af; font-size: 13px; display: none;">
+        <div id="statusText">Starting...</div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; margin-top: 6px; overflow: hidden;">
+            <div id="progressBar" style="background: #3b82f6; height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+    </div>
+</div>
+
+<div id="results" style="display: none;">
+    <!-- Overview Metrics -->
+    <div id="metricsGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px;"></div>
+
+    <!-- Equity Curve -->
+    <div style="background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+        <div style="font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Equity Curve</div>
+        <div style="position: relative; height: 300px; width: 100%;"><canvas id="equityChart"></canvas></div>
+    </div>
+
+    <!-- Strategy Comparison -->
+    <div style="background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+        <div style="font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Strategy Comparison</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+                <tr style="border-bottom: 2px solid #334155;">
+                    <th style="padding: 8px 12px; text-align: left; color: #6b7280; font-size: 11px; text-transform: uppercase;">Strategy</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Trades</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Win Rate</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Avg Return</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Total P&L</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Profit Factor</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Best</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Worst</th>
+                    <th style="padding: 8px 12px; color: #6b7280; font-size: 11px; text-transform: uppercase;">Avg Hold</th>
+                </tr>
+            </thead>
+            <tbody id="strategyBody"></tbody>
+        </table>
+    </div>
+
+    <!-- Monthly Returns -->
+    <div style="background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+        <div style="font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Monthly Returns</div>
+        <div id="monthlyGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;"></div>
+    </div>
+
+    <!-- Trade Log -->
+    <div style="background: #1e293b; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="font-size: 13px; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px;">Trade Log</div>
+            <select id="tradeFilter" onchange="filterTrades()" style="background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 12px;">
+                <option value="all">All Trades</option>
+                <option value="wins">Winners Only</option>
+                <option value="losses">Losers Only</option>
+            </select>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+                <tr style="border-bottom: 2px solid #334155;">
+                    <th style="padding: 6px 10px; text-align: left; color: #6b7280; font-size: 10px; text-transform: uppercase;">Symbol</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Strategy</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Entry Date</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Entry</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Exit Date</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Exit</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">P&L</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Reason</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Days</th>
+                    <th style="padding: 6px 10px; color: #6b7280; font-size: 10px; text-transform: uppercase;">Score</th>
+                </tr>
+            </thead>
+            <tbody id="tradeBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div id="emptyState" class="empty-state">
+    <div class="icon">📊</div>
+    <p>Configure date range and universe size, then click <strong>Run Backtest</strong> to replay your strategies on historical data.</p>
+    <p style="color: #6b7280; font-size: 12px; margin-top: 8px;">Uses the same 5 strategies, quality gates, trailing stops, and R:R filters as live trading. No look-ahead bias.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+var allTrades = [];
+var pollTimer = null;
+var equityChartInstance = null;
+
+(function setDefaults() {
+    var now = new Date();
+    var end = now.toISOString().split('T')[0];
+    var start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().split('T')[0];
+    document.getElementById('endDate').value = end;
+    document.getElementById('startDate').value = start;
+})();
+
+function startBacktest() {
+    var btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    document.getElementById('statusBar').style.display = 'block';
+    document.getElementById('statusText').textContent = 'Starting backtest...';
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('results').style.display = 'none';
+
+    var body = {
+        start_date: document.getElementById('startDate').value,
+        end_date: document.getElementById('endDate').value,
+        universe_size: parseInt(document.getElementById('universeSize').value)
+    };
+
+    fetch('/api/backtest/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    }).then(function() { pollStatus(); });
+}
+
+function pollStatus() {
+    if (pollTimer) clearTimeout(pollTimer);
+
+    fetch('/api/backtest/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var btn = document.getElementById('runBtn');
+
+            if (data.status === 'done') {
+                btn.disabled = false;
+                btn.textContent = 'Run Again';
+                document.getElementById('statusBar').style.display = 'none';
+                renderResults(data.result);
+            } else if (data.status === 'error') {
+                btn.disabled = false;
+                btn.textContent = 'Run Backtest';
+                document.getElementById('statusText').textContent = 'Error: ' + data.error;
+                document.getElementById('progressBar').style.width = '0%';
+            } else if (data.status === 'running') {
+                var pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+                var phaseText = data.phase === 'downloading' ? 'Downloading data' : 'Simulating trades';
+                document.getElementById('statusText').textContent = phaseText + '... ' + data.progress + '/' + data.total + ' (' + pct + '%)';
+                document.getElementById('progressBar').style.width = pct + '%';
+                btn.textContent = phaseText + ' ' + pct + '%';
+                pollTimer = setTimeout(pollStatus, 2000);
+            } else {
+                pollTimer = setTimeout(pollStatus, 2000);
+            }
+        });
+}
+
+function renderResults(result) {
+    document.getElementById('results').style.display = 'block';
+    var m = result.metrics;
+    allTrades = result.trades || [];
+
+    // Metrics cards
+    var grid = document.getElementById('metricsGrid');
+    var cs = 'background: #0f172a; border-radius: 8px; padding: 14px;';
+    var ls = 'color: #6b7280; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;';
+    var vs = 'font-size: 22px; font-weight: 800; font-family: monospace; margin-top: 4px;';
+
+    grid.innerHTML =
+        mc(cs, ls, vs, 'Total Trades', m.total_trades, '#e2e8f0') +
+        mc(cs, ls, vs, 'Win Rate', m.win_rate + '%', m.win_rate >= 50 ? '#22c55e' : '#ef4444') +
+        mc(cs, ls, vs, 'Avg Return', fmt(m.avg_return_pct), m.avg_return_pct >= 0 ? '#22c55e' : '#ef4444') +
+        mc(cs, ls, vs, 'Total Return', fmt(m.total_return_pct), m.total_return_pct >= 0 ? '#22c55e' : '#ef4444') +
+        mc(cs, ls, vs, 'Sharpe Ratio', m.sharpe_ratio, m.sharpe_ratio >= 1 ? '#22c55e' : m.sharpe_ratio >= 0 ? '#eab308' : '#ef4444') +
+        mc(cs, ls, vs, 'Max Drawdown', m.max_drawdown_pct + '%', '#ef4444') +
+        mc(cs, ls, vs, 'Profit Factor', m.profit_factor, m.profit_factor >= 1.5 ? '#22c55e' : m.profit_factor >= 1 ? '#eab308' : '#ef4444') +
+        mc(cs, ls, vs, 'Avg Hold', m.avg_holding_days + 'd', '#e2e8f0');
+
+    // Equity curve
+    renderEquityCurve(result.equity_curve);
+
+    // Strategy table
+    var sb = document.getElementById('strategyBody');
+    var strats = result.strategy_metrics;
+    sb.innerHTML = Object.keys(strats).map(function(name) {
+        var s = strats[name];
+        var wrColor = s.win_rate >= 50 ? '#22c55e' : '#ef4444';
+        var pnlColor = s.total_pnl_pct >= 0 ? '#22c55e' : '#ef4444';
+        return '<tr style="border-bottom: 1px solid #1e293b;">' +
+            '<td style="padding: 8px 12px; color: #e2e8f0; font-weight: 700;">' + name.replace(/_/g, ' ') + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center;">' + s.total_trades + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center; color:' + wrColor + '; font-weight: 700;">' + s.win_rate + '%</td>' +
+            '<td style="padding: 8px 12px; text-align: center; font-family: monospace;">' + fmt(s.avg_return_pct) + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center; font-family: monospace; color:' + pnlColor + '; font-weight: 700;">' + fmt(s.total_pnl_pct) + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center; font-family: monospace;">' + s.profit_factor + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center; color: #22c55e; font-family: monospace;">' + fmt(s.best_trade_pct) + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center; color: #ef4444; font-family: monospace;">' + fmt(s.worst_trade_pct) + '</td>' +
+            '<td style="padding: 8px 12px; text-align: center;">' + s.avg_holding_days + 'd</td></tr>';
+    }).join('');
+
+    // Monthly returns
+    var mg = document.getElementById('monthlyGrid');
+    mg.innerHTML = (result.monthly_returns || []).map(function(m) {
+        var bg = m.total_pnl >= 0 ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
+        var color = m.total_pnl >= 0 ? '#22c55e' : '#ef4444';
+        return '<div style="background:' + bg + '; border-radius: 6px; padding: 10px; text-align: center;">' +
+            '<div style="font-size: 11px; color: #9ca3af; font-weight: 700;">' + m.month + '</div>' +
+            '<div style="font-size: 18px; font-weight: 800; font-family: monospace; color:' + color + '; margin-top: 2px;">' + fmt(m.total_pnl) + '</div>' +
+            '<div style="font-size: 10px; color: #6b7280;">' + m.trades + ' trades | ' + m.win_rate + '% WR</div></div>';
+    }).join('');
+
+    // Trade log
+    renderTrades(allTrades);
+}
+
+function renderEquityCurve(curve) {
+    if (!curve || !curve.length) return;
+    var ctx = document.getElementById('equityChart').getContext('2d');
+    if (equityChartInstance) equityChartInstance.destroy();
+
+    var labels = curve.map(function(c) { return c.date; });
+    var values = curve.map(function(c) { return c.equity; });
+
+    equityChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Portfolio Value (Rs.)',
+                data: values,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59,130,246,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) { return 'Rs.' + ctx.parsed.y.toLocaleString(); }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    ticks: { color: '#6b7280', maxTicksLimit: 12, font: { size: 10 } },
+                    grid: { color: '#1e293b' }
+                },
+                y: {
+                    display: true,
+                    ticks: {
+                        color: '#6b7280',
+                        font: { size: 10 },
+                        callback: function(v) { return 'Rs.' + (v/100000).toFixed(1) + 'L'; }
+                    },
+                    grid: { color: '#1e293b' }
+                }
+            }
+        }
+    });
+}
+
+function renderTrades(trades) {
+    var tbody = document.getElementById('tradeBody');
+    if (!trades.length) {
+        tbody.innerHTML = '<tr><td colspan="10" style="padding: 20px; text-align: center; color: #6b7280;">No trades</td></tr>';
+        return;
+    }
+    tbody.innerHTML = trades.map(function(t) {
+        var pnlColor = t.pnl_pct >= 0 ? '#22c55e' : '#ef4444';
+        var reasonColor = t.exit_reason === 'TARGET_HIT' ? '#22c55e' : t.exit_reason === 'STOP_LOSS_HIT' ? '#ef4444' : '#eab308';
+        return '<tr style="border-bottom: 1px solid #0f172a;">' +
+            '<td style="padding: 6px 10px;"><strong style="color: #e2e8f0;">' + t.symbol.replace('.NS', '') + '</strong></td>' +
+            '<td style="padding: 6px 10px; font-size: 11px;">' + t.strategy.replace(/_/g, ' ') + '</td>' +
+            '<td style="padding: 6px 10px; font-size: 11px; color: #9ca3af;">' + t.entry_date + '</td>' +
+            '<td style="padding: 6px 10px; font-family: monospace; color: #3b82f6;">Rs.' + t.entry_price.toFixed(2) + '</td>' +
+            '<td style="padding: 6px 10px; font-size: 11px; color: #9ca3af;">' + t.exit_date + '</td>' +
+            '<td style="padding: 6px 10px; font-family: monospace;">Rs.' + t.exit_price.toFixed(2) + '</td>' +
+            '<td style="padding: 6px 10px; font-family: monospace; font-weight: 700; color:' + pnlColor + ';">' + fmt(t.pnl_pct) + '</td>' +
+            '<td style="padding: 6px 10px; font-size: 10px; color:' + reasonColor + '; font-weight: 600;">' + t.exit_reason.replace(/_/g, ' ') + '</td>' +
+            '<td style="padding: 6px 10px; text-align: center;">' + t.holding_days + '</td>' +
+            '<td style="padding: 6px 10px; font-family: monospace; font-size: 11px;">' + t.score.toFixed(3) + '</td></tr>';
+    }).join('');
+}
+
+function filterTrades() {
+    var f = document.getElementById('tradeFilter').value;
+    var filtered = allTrades;
+    if (f === 'wins') filtered = allTrades.filter(function(t) { return t.pnl_pct > 0; });
+    else if (f === 'losses') filtered = allTrades.filter(function(t) { return t.pnl_pct <= 0; });
+    renderTrades(filtered);
+}
+
+function mc(cs, ls, vs, label, value, color) {
+    return '<div style="' + cs + '"><div style="' + ls + '">' + label + '</div><div style="' + vs + 'color:' + color + ';">' + value + '</div></div>';
+}
+
+function fmt(v) {
+    if (v === null || v === undefined) return '—';
+    return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+}
+</script>
+{% endblock %}

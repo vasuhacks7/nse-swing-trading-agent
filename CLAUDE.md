@@ -10,17 +10,29 @@ Scans ALL NSE-listed stocks (~2000+), checks market regime and institutional flo
 - `data/earnings_calendar.py` — Skips stocks with results within 5 days
 - `data/circuit_check.py` — Detects stocks at upper/lower circuit limits
 - `data/sector_strength.py` — Ranks sectors by momentum, boosts/penalizes picks accordingly
+- `data/global_context.py` — Pre-market global check: S&P 500 futures, DXY, crude oil, India VIX
+- `data/market_breadth.py` — Nifty 50 breadth: % above 200 EMA, advance/decline ratio, new highs/lows
+- `data/news_sentiment.py` — Google News RSS sentiment scanner, skips stocks with negative catalysts
+- `data/portfolio_risk.py` — Sector concentration limits + correlation group checks (no 2 banks same day)
+- `data/intraday_check.py` — 15-min intraday entry refinement: VWAP, RSI, range position check
 - `data/fetcher.py` — Yahoo Finance for NSE stocks (.NS), OHLCV + fundamentals (P/E, ROE, D/E, growth)
 - `data/store.py` — SQLite: alerts (with trailing SL, installments), strategy scores, improvement log, premium picks
 - `data/apoorv_tracker.py` — Expert channel scanner: scrapes public TradingView analysis posts, parses stock symbols, deduplicates, stores in DB
 - `data/preprocessor.py` — Technical indicators (RSI, MACD, Bollinger, ADX, Stochastic, EMAs, ATR)
 - `data/advanced_analysis.py` — Fibonacci retracement/extensions, supply/demand zones, trendline detection, confluence scoring
-- `strategy/` — 5 independent strategies, each enforces minimum 1:2 R:R:
+- `strategy/` — 12 independent strategies, each enforces minimum 1:2 R:R:
   - `momentum_breakout.py` — 20-day high breakout with volume surge (1:3 R:R)
   - `mean_reversion.py` — RSI oversold + Bollinger lower band + strong fundamentals (1:2+ R:R)
   - `macd_rsi_confluence.py` — MACD crossover + RSI in buy zone (1:2.5 R:R)
   - `fundamental_value.py` — Low P/E, high ROE, low debt, growing revenue + technical confirmation (1:2 R:R)
   - `trend_following.py` — EMA alignment + ADX strength + pullback entry (1:3 R:R)
+  - `volatility_contraction.py` — NR7/NR4 + Bollinger squeeze in uptrend = coiled spring breakout (1:3 R:R)
+  - `fifty_two_week_high.py` — Stocks -2% to -10% from 52-week high, pulled back to EMA, bouncing (1:2.5 R:R)
+  - `relative_strength.py` — Top 3M/6M performers pulling back to EMA support (1:2.5 R:R)
+  - `inside_bar_breakout.py` — Inside bar in uptrend near EMA support, tight stop (1:2.5 R:R)
+  - `gap_and_go.py` — Gap up ≥2% on ≥1.5x volume from tight base (1:3 R:R)
+  - `bollinger_squeeze.py` — BB width at historic low then expanding + positive momentum (1:3 R:R)
+  - `vwap_bounce.py` — Pullback to VWAP with volume dry-up then bounce in uptrend (1:2.5 R:R)
 - `strategy/manager.py` — Runs all strategies, applies weights, returns top picks
 - `agent/alert_engine.py` — Orchestrates all 6 pre-checks + strategy scan + quality gate
 - `agent/improvement_engine.py` — Strategy scoreboard, weight adjustment, LLM reflection
@@ -44,6 +56,12 @@ Scans ALL NSE-listed stocks (~2000+), checks market regime and institutional flo
 4. **Circuit Limit Detection** — Rejects stocks at/near upper circuit (can't buy) or lower circuit
 5. **NSE Holiday Calendar** — Won't run on weekends or NSE holidays (2025-2026 calendar built in)
 6. **Sector Rotation** — Ranks sectors by momentum, gives +5% score boost to strong sectors, -5% to weak
+7. **Global Context** — Pre-market check of S&P 500 futures, DXY (dollar index), crude oil, India VIX. Bearish global = raise quality bar
+8. **Market Breadth** — Nifty 50: % stocks above 200 EMA, advance/decline ratio, 20d highs vs lows. Weak breadth = raise quality bar
+9. **News Sentiment** — Google News RSS scanner: skips stocks with 2+ negative headlines (fraud, SEBI, downgrades, etc.)
+10. **Portfolio Risk** — Max 1 stock per sector per day, no 2 correlated stocks (e.g., HDFCBANK + ICICIBANK blocked)
+11. **Partial Profit Booking** — Books 50% at 1R profit, trails remaining 50%. Blended P&L on close
+12. **Intraday Entry Refinement** — 15-min data check: skips if overbought/near high, adjusts entry on VWAP pullback
 
 ## Apoorv-Inspired Features
 - **Trailing Stop Loss** — After price moves 1R in profit, SL trails at 3% below highest price

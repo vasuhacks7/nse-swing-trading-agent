@@ -9,6 +9,7 @@ from data.store import DataStore
 from data.fetcher import DataFetcher
 from data.preprocessor import Preprocessor
 from strategy.manager import StrategyManager
+from reflection.llm_advisor import LLMAdvisor
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ class ScannerLearner:
         self.store.init_scanner()
         weights = self.store.get_latest_strategy_weights()
         self.strategy_mgr = StrategyManager(settings.strategies, weights or None)
+        llm_model = settings.reflection.get("model", "claude-haiku-4-5")
+        self.llm = LLMAdvisor(model=llm_model)
 
     def run_full_scan(self, on_progress=None) -> list[dict]:
         import yfinance as yf
@@ -150,6 +153,61 @@ class ScannerLearner:
             -r.get("strategy_count", 0),
         ))
 
+        # --- LLM validation on top BUY picks ---
+        if self.llm.client:
+            buy_picks = [r for r in results if r["signal"] in ("STRONG_BUY", "BUY")][:10]
+            if buy_picks:
+                logger.info(f"Scanner: running LLM validation on top {len(buy_picks)} BUY picks...")
+                for r in buy_picks:
+                    strat_text = "\n".join(
+                        f"- {s['name']}: score={s['score']}, R:R=1:{s['rr']:.1f}, {s['reasoning']}"
+                        for s in r.get("strategy_details", [])
+                    ) or "None"
+
+                    pick_data = {
+                        "symbol": r["symbol"],
+                        "current_price": r.get("current_price", 0),
+                        "entry": r.get("entry", 0),
+                        "target": r.get("target", 0),
+                        "stop_loss": r.get("stop_loss", 0),
+                        "signal": r["signal"],
+                        "confluence_score": r.get("confluence_score", 0),
+                        "max_confluence": r.get("max_confluence", 12),
+                        "factors": r.get("factors", ""),
+                        "weekly_trend": r.get("weekly_trend", ""),
+                        "rs_trend": r.get("rs_trend", ""),
+                        "strategy_signals": strat_text,
+                        "fundamentals": "Not available",
+                        "market_regime": "N/A",
+                        "fii_sentiment": "N/A",
+                        "sector": "",
+                        "sector_strength": "N/A",
+                    }
+
+                    try:
+                        result = self.llm.validate_pick(pick_data)
+                        r["llm_verdict"] = result.get("verdict", "BUY")
+                        r["llm_confidence"] = result.get("confidence", 0.5)
+                        r["llm_reasoning"] = result.get("reasoning", "")
+                        r["llm_risk_flags"] = result.get("risk_flags", [])
+
+                        if r["llm_verdict"] == "SKIP":
+                            r["signal"] = "WATCH"
+                            logger.info(f"Scanner LLM downgraded {r['symbol']} to WATCH: {r['llm_reasoning'][:80]}")
+                        elif r["llm_verdict"] == "STRONG_BUY" and r["signal"] == "BUY":
+                            r["signal"] = "STRONG_BUY"
+                            logger.info(f"Scanner LLM upgraded {r['symbol']} to STRONG_BUY")
+                        else:
+                            logger.info(f"Scanner LLM {r['llm_verdict']} {r['symbol']} (conf={r['llm_confidence']:.0%})")
+                    except Exception as e:
+                        logger.error(f"Scanner LLM validation failed for {r['symbol']}: {e}")
+
+                results.sort(key=lambda r: (
+                    0 if r["signal"] == "STRONG_BUY" else 1 if r["signal"] == "BUY" else 2 if r["signal"] == "WATCH" else 3,
+                    -r["confluence_score"],
+                    -r.get("strategy_count", 0),
+                ))
+
         self.save_scan_results(results)
         buy_count = sum(1 for r in results if r["signal"] in ("STRONG_BUY", "BUY"))
         strat_count = sum(1 for r in results if r.get("strategy_count", 0) > 0)
@@ -181,6 +239,9 @@ class ScannerLearner:
                 "confluence_factors": all_factors,
                 "weekly_trend": r.get("weekly_trend", ""),
                 "rs_trend": r.get("rs_trend", ""),
+                "llm_verdict": r.get("llm_verdict", ""),
+                "llm_reasoning": r.get("llm_reasoning", ""),
+                "llm_confidence": r.get("llm_confidence", 0),
             })
             saved += 1
         logger.info(f"Scanner learner: saved {saved} BUY picks from scan")
@@ -338,7 +399,8 @@ class ScannerLearner:
             cursor = conn.execute(
                 """SELECT symbol, signal, confluence_score, entry_price as entry,
                           target_price as target, stop_loss, confluence_factors as factors,
-                          weekly_trend, rs_trend, scan_date
+                          weekly_trend, rs_trend, scan_date,
+                          llm_verdict, llm_reasoning, llm_confidence
                    FROM scanner_picks
                    WHERE scan_date = (SELECT MAX(scan_date) FROM scanner_picks)
                    ORDER BY confluence_score DESC"""
@@ -361,6 +423,9 @@ class ScannerLearner:
                 "rs_trend": r.get("rs_trend", "—"),
                 "factors": r.get("factors", ""),
                 "scan_date": r.get("scan_date"),
+                "llm_verdict": r.get("llm_verdict", ""),
+                "llm_reasoning": r.get("llm_reasoning", ""),
+                "llm_confidence": r.get("llm_confidence", 0),
             })
         return results
 

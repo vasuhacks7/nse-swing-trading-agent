@@ -17,6 +17,8 @@ from agent.alert_engine import AlertEngine
 from agent.improvement_engine import ImprovementEngine
 from data.market_context import get_market_regime, get_fii_dii_activity, is_market_open_today
 from data.sector_strength import compute_sector_strength
+from data.global_context import get_global_context
+from data.market_breadth import get_market_breadth
 from notifications.telegram_bot import send_daily_alerts, send_close_notification
 from data.advanced_analysis import full_analysis
 from agent.paper_trader import PaperTrader
@@ -120,6 +122,8 @@ async def dashboard(request: Request):
     regime = get_market_regime()
     flows = get_fii_dii_activity()
     perf = alert_engine.get_performance_summary()
+    global_ctx = get_global_context()
+    breadth = get_market_breadth()
 
     today = datetime.now().strftime("%Y-%m-%d")
     today_alerts = alert_engine.store.get_alerts_for_date(today)
@@ -136,6 +140,8 @@ async def dashboard(request: Request):
         "perf": perf,
         "alerts": alerts_list,
         "open_positions": open_list,
+        "global_ctx": global_ctx,
+        "breadth": breadth,
     })
 
 
@@ -342,11 +348,13 @@ async def api_track():
 
 @app.get("/api/market")
 async def api_market():
-    return {
+    return _sanitize({
         "market_open": is_market_open_today(),
         "regime": get_market_regime(),
         "fii_dii": get_fii_dii_activity(),
-    }
+        "global_context": get_global_context(),
+        "breadth": get_market_breadth(),
+    })
 
 
 @app.get("/api/performance")
@@ -464,6 +472,96 @@ async def api_scanner_performance():
 async def api_scanner_latest():
     results = scanner_learner.get_latest_scan_results()
     return _sanitize({"results": results, "count": len(results)})
+
+
+# --- Backtest ---
+from agent.backtester import Backtester
+
+_bt_state = {"running": False, "phase": "", "progress": 0, "total": 0, "done": False, "result": None, "error": None}
+
+
+def _run_backtest(start_date: str, end_date: str, universe_size: int):
+    _bt_state["running"] = True
+    _bt_state["done"] = False
+    _bt_state["result"] = None
+    _bt_state["error"] = None
+    _bt_state["phase"] = "starting"
+    _bt_state["progress"] = 0
+    _bt_state["total"] = 0
+
+    def on_progress(phase, current, total):
+        _bt_state["phase"] = phase
+        _bt_state["progress"] = current
+        _bt_state["total"] = total
+
+    try:
+        bt = Backtester(settings, start_date=start_date, end_date=end_date,
+                        universe_size=universe_size)
+        result = bt.run(on_progress=on_progress)
+        _bt_state["result"] = {
+            "metrics": result.metrics,
+            "strategy_metrics": result.strategy_metrics,
+            "monthly_returns": result.monthly_returns,
+            "equity_curve": result.equity_curve,
+            "trades": [
+                {
+                    "symbol": t.symbol, "strategy": t.strategy,
+                    "entry_date": t.entry_date, "entry_price": t.entry_price,
+                    "target_price": t.target_price, "stop_loss": t.stop_loss,
+                    "exit_date": t.exit_date, "exit_price": t.exit_price,
+                    "exit_reason": t.exit_reason, "pnl_pct": t.pnl_pct,
+                    "holding_days": t.holding_days, "score": t.score,
+                    "risk_reward": t.risk_reward,
+                }
+                for t in result.trades if t.exit_reason != "BACKTEST_END"
+            ],
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "universe_size": result.universe_size,
+        }
+    except Exception as e:
+        logger.error(f"Backtest failed: {e}", exc_info=True)
+        _bt_state["error"] = str(e)
+
+    _bt_state["running"] = False
+    _bt_state["done"] = True
+
+
+@app.get("/backtest", response_class=HTMLResponse)
+async def page_backtest(request: Request):
+    return _render(request, "backtest.html", {"active": "backtest"})
+
+
+@app.post("/api/backtest/run")
+async def api_backtest_run(request: Request):
+    if _bt_state["running"]:
+        return {"status": "already_running"}
+    body = await request.json()
+    start_date = body.get("start_date", "")
+    end_date = body.get("end_date", "")
+    universe_size = int(body.get("universe_size", 200))
+    thread = threading.Thread(target=_run_backtest, args=(start_date, end_date, universe_size), daemon=True)
+    thread.start()
+    return {"status": "started"}
+
+
+@app.get("/api/backtest/status")
+async def api_backtest_status():
+    if _bt_state["done"] and _bt_state["result"]:
+        return _sanitize({
+            "status": "done",
+            "result": _bt_state["result"],
+        })
+    elif _bt_state["done"] and _bt_state["error"]:
+        return {"status": "error", "error": _bt_state["error"]}
+    elif _bt_state["running"]:
+        return _sanitize({
+            "status": "running",
+            "phase": _bt_state["phase"],
+            "progress": _bt_state["progress"],
+            "total": _bt_state["total"],
+        })
+    return {"status": "idle"}
 
 
 if __name__ == "__main__":

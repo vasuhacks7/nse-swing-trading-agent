@@ -50,6 +50,24 @@ def cmd_market(settings: Settings, args):
     if f.get("fii_net_cr") is not None:
         print(f"  FII Net:         Rs.{f['fii_net_cr']:.0f} Cr")
         print(f"  DII Net:         Rs.{f.get('dii_net_cr', 0):.0f} Cr")
+
+    g = snap.get("global_context", {})
+    if g:
+        print(f"\n  Global Sentiment: {g.get('overall_sentiment', '?')}")
+        for name, detail in g.get("details", {}).items():
+            change = detail.get("change_pct")
+            label = name.replace("_", " ").title()
+            if change is not None:
+                print(f"  {label:18s} {detail.get('last', '?'):>10}  ({change:+.2f}%)")
+            else:
+                print(f"  {label:18s} {detail.get('last', '?')}")
+
+    b = snap.get("breadth", {})
+    if b:
+        print(f"\n  Breadth Signal:  {b.get('breadth_signal', '?')}")
+        print(f"  % > 200 EMA:     {b.get('above_200ema_pct', '?')}%")
+        print(f"  A/D Ratio:       {b.get('ad_ratio', '?')}")
+        print(f"  20d Highs/Lows:  {b.get('new_20d_highs', 0)} / {b.get('new_20d_lows', 0)}")
     print()
 
 
@@ -200,6 +218,56 @@ def cmd_daily(settings: Settings, args):
             print(f"  {c['symbol']}: {c['pnl_pct']:+.2f}%")
 
 
+def cmd_backtest(settings: Settings, args):
+    from agent.backtester import Backtester
+
+    start = args.start or (datetime.now() - __import__("datetime").timedelta(days=365)).strftime("%Y-%m-%d")
+    end = args.end or datetime.now().strftime("%Y-%m-%d")
+    size = int(args.stocks)
+
+    print(f"\n{'='*60}")
+    print(f"  BACKTEST: {start} to {end} ({size} stocks)")
+    print(f"{'='*60}\n")
+
+    bt = Backtester(settings, start_date=start, end_date=end, universe_size=size)
+
+    def progress(phase, current, total):
+        if current % 50 == 0 or current == total:
+            print(f"  [{phase}] {current}/{total}")
+
+    result = bt.run(on_progress=progress)
+    m = result.metrics
+
+    print(f"\n  {'RESULTS':=^50}\n")
+    print(f"  Total Trades:    {m.get('total_trades', 0)}")
+    print(f"  Win Rate:        {m.get('win_rate', 0):.1f}%")
+    print(f"  Avg Return:      {m.get('avg_return_pct', 0):+.2f}%")
+    print(f"  Total Return:    {m.get('total_return_pct', 0):+.2f}%")
+    print(f"  Sharpe Ratio:    {m.get('sharpe_ratio', 0):.2f}")
+    print(f"  Max Drawdown:    {m.get('max_drawdown_pct', 0):.2f}%")
+    print(f"  Profit Factor:   {m.get('profit_factor', 0):.2f}")
+    print(f"  Avg Hold:        {m.get('avg_holding_days', 0):.1f} days")
+    print(f"  Final Equity:    Rs.{m.get('final_equity', 0):,.0f}")
+
+    print(f"\n  {'STRATEGY BREAKDOWN':=^50}\n")
+    print(f"  {'Strategy':<25} {'Trades':>6} {'WinRate':>8} {'AvgRet':>8} {'TotalPnL':>9} {'PF':>5}")
+    print(f"  {'-'*62}")
+    for name, s in result.strategy_metrics.items():
+        print(f"  {name:<25} {s['total_trades']:>6} "
+              f"{s['win_rate']:>7.1f}% "
+              f"{s['avg_return_pct']:>+7.2f}% "
+              f"{s['total_pnl_pct']:>+8.2f}% "
+              f"{s['profit_factor']:>5.2f}")
+
+    if result.monthly_returns:
+        print(f"\n  {'MONTHLY RETURNS':=^50}\n")
+        for mr in result.monthly_returns:
+            bar = "+" * int(abs(mr["total_pnl"])) if mr["total_pnl"] >= 0 else "-" * int(abs(mr["total_pnl"]))
+            print(f"  {mr['month']}  {mr['total_pnl']:>+7.2f}%  ({mr['trades']} trades, {mr['win_rate']:.0f}% WR)  {bar[:20]}")
+
+    print()
+
+
 def cmd_dashboard(settings: Settings, args):
     import subprocess
     dashboard_path = Path(__file__).parent / "dashboard" / "app.py"
@@ -221,6 +289,11 @@ def main():
     sub.add_parser("improve", help="Run self-improvement cycle")
     sub.add_parser("daily", help="Full daily run: track + alerts + improve if due")
 
+    bt = sub.add_parser("backtest", help="Backtest strategies on historical data")
+    bt.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")
+    bt.add_argument("--end", default=None, help="End date (YYYY-MM-DD)")
+    bt.add_argument("--stocks", default="200", help="Universe size (number of stocks)")
+
     hist = sub.add_parser("history", help="Show alert history")
     hist.add_argument("--limit", default="50")
 
@@ -241,6 +314,7 @@ def main():
         "report": cmd_report,
         "improve": cmd_improve,
         "daily": cmd_daily,
+        "backtest": cmd_backtest,
         "history": cmd_history,
         "dashboard": cmd_dashboard,
     }

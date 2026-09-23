@@ -29,6 +29,8 @@ class DataStore:
                 ("highest_price", "REAL", "NULL"),
                 ("installment", "INTEGER", "1"),
                 ("qty_pct", "REAL", "1.0"),
+                ("partial_booked", "INTEGER", "0"),
+                ("partial_exit_price", "REAL", "NULL"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE alerts ADD COLUMN {col} {typ} DEFAULT {default}")
@@ -74,6 +76,8 @@ class DataStore:
                     highest_price REAL,
                     installment INTEGER DEFAULT 1,
                     qty_pct REAL DEFAULT 1.0,
+                    partial_booked INTEGER DEFAULT 0,
+                    partial_exit_price REAL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -131,6 +135,20 @@ class DataStore:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS scanner_picks_migration (v INT);
+            """)
+
+            for col, typ, default in [
+                ("llm_verdict", "TEXT", "''"),
+                ("llm_reasoning", "TEXT", "''"),
+                ("llm_confidence", "REAL", "0"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE scanner_picks ADD COLUMN {col} {typ} DEFAULT {default}")
+                except Exception:
+                    pass
+
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS scanner_factor_scores (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     factor TEXT NOT NULL UNIQUE,
@@ -164,14 +182,16 @@ class DataStore:
                 """INSERT INTO scanner_picks
                    (scan_date, symbol, signal, confluence_score, entry_price,
                     target_price, stop_loss, confluence_factors, weekly_trend,
-                    rs_trend, max_price, min_price)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    rs_trend, max_price, min_price, llm_verdict, llm_reasoning, llm_confidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (pick["scan_date"], pick["symbol"], pick["signal"],
                  pick.get("confluence_score", 0), pick.get("entry_price"),
                  pick.get("target_price"), pick.get("stop_loss"),
                  pick.get("confluence_factors", ""),
                  pick.get("weekly_trend", ""), pick.get("rs_trend", ""),
-                 pick.get("entry_price"), pick.get("entry_price")),
+                 pick.get("entry_price"), pick.get("entry_price"),
+                 pick.get("llm_verdict", ""), pick.get("llm_reasoning", ""),
+                 pick.get("llm_confidence", 0)),
             )
             return cursor.lastrowid
 
@@ -414,12 +434,20 @@ class DataStore:
                     exit_reason: str):
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT entry_price, date FROM alerts WHERE id = ?", (alert_id,)
+                "SELECT entry_price, date, partial_booked, partial_exit_price FROM alerts WHERE id = ?",
+                (alert_id,),
             ).fetchone()
             if not row:
                 return
-            entry_price, entry_date = row
-            pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+            entry_price, entry_date, partial_booked, partial_exit_price = row
+
+            if partial_booked and partial_exit_price:
+                partial_pnl = ((partial_exit_price - entry_price) / entry_price) * 100
+                final_pnl = ((exit_price - entry_price) / entry_price) * 100
+                pnl_pct = 0.5 * partial_pnl + 0.5 * final_pnl
+            else:
+                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+
             holding_days = (pd.Timestamp(exit_date) - pd.Timestamp(entry_date)).days
             conn.execute(
                 """UPDATE alerts SET status='CLOSED', exit_price=?, exit_date=?,
@@ -458,6 +486,13 @@ class DataStore:
             conn.execute(
                 "UPDATE alerts SET trailing_stop=?, highest_price=? WHERE id=?",
                 (round(new_stop, 2), round(highest_price, 2), alert_id),
+            )
+
+    def mark_partial_booked(self, alert_id: int, exit_price: float):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE alerts SET partial_booked=1, partial_exit_price=? WHERE id=?",
+                (round(exit_price, 2), alert_id),
             )
 
     def get_recent_streak(self) -> dict:

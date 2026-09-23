@@ -11,7 +11,13 @@ from data.market_context import is_market_open_today, get_market_regime, get_fii
 from data.earnings_calendar import has_upcoming_earnings
 from data.circuit_check import check_circuit_status
 from data.sector_strength import compute_sector_strength, get_sector_bonus
+from data.global_context import get_global_context
+from data.market_breadth import get_market_breadth
+from data.news_sentiment import check_news_sentiment
+from data.portfolio_risk import check_portfolio_risk
+from data.intraday_check import check_intraday_entry
 from strategy.manager import StrategyManager
+from reflection.llm_advisor import LLMAdvisor
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +30,9 @@ class AlertEngine:
 
         weights = self.store.get_latest_strategy_weights()
         self.strategy_mgr = StrategyManager(settings.strategies, weights or None)
+
+        llm_model = settings.reflection.get("model", "claude-haiku-4-5")
+        self.llm = LLMAdvisor(model=llm_model)
 
     def generate_daily_alerts(self) -> list[dict]:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -69,6 +78,32 @@ class AlertEngine:
         if fii_sentiment == "HEAVY_SELLING":
             min_score += 0.05
             logger.info(f"FII heavy selling: raised min_score to {min_score:.2f}")
+
+        # --- CHECK 3b: Global context (US futures, DXY, crude) ---
+        global_ctx = get_global_context()
+        global_sentiment = global_ctx.get("overall_sentiment", "NEUTRAL")
+        global_adj = global_ctx.get("score_adjustment", 0)
+        if global_adj != 0:
+            min_score += global_adj
+            no_trade_threshold += global_adj
+            logger.info(f"Global context: {global_sentiment} — "
+                        f"adj min_score to {min_score:.2f}")
+        for name, detail in global_ctx.get("details", {}).items():
+            logger.info(f"  {name}: {detail}")
+
+        # --- CHECK 3c: Market breadth ---
+        breadth = get_market_breadth()
+        breadth_signal = breadth.get("breadth_signal", "NEUTRAL")
+        breadth_adj = breadth.get("score_adjustment", 0)
+        if breadth_adj != 0:
+            min_score += breadth_adj
+            no_trade_threshold += breadth_adj
+            logger.info(f"Breadth: {breadth_signal} — "
+                        f"adj min_score to {min_score:.2f}")
+        logger.info(f"Breadth: {breadth.get('above_200ema_pct', 0)}% >200EMA, "
+                     f"A/D={breadth.get('ad_ratio', '?')}, "
+                     f"Highs={breadth.get('new_20d_highs', 0)} / "
+                     f"Lows={breadth.get('new_20d_lows', 0)}")
 
         # --- FETCH & PREPARE DATA ---
         logger.info("Fetching universe data...")
@@ -127,6 +162,23 @@ class AlertEngine:
             final_picks.append(pick)
         picks = final_picks
 
+        # --- CHECK 7: News sentiment filter ---
+        news_filtered = []
+        for pick in picks:
+            news = check_news_sentiment(pick.symbol)
+            if news["should_skip"]:
+                logger.info(f"SKIP {pick.symbol}: news sentiment {news['sentiment']} — "
+                            f"{news['negative_headlines'][:2]}")
+                continue
+            pick._news_sentiment = news["sentiment"]
+            news_filtered.append(pick)
+        picks = news_filtered
+
+        # --- CHECK 8: Portfolio risk (sector concentration + correlation) ---
+        open_alerts = self.store.get_open_alerts()
+        open_list = open_alerts.to_dict("records") if not open_alerts.empty else []
+        picks = check_portfolio_risk(picks, open_list, universe_data)
+
         # --- NO-TRADE QUALITY GATE ---
         if picks and picks[0].score < no_trade_threshold:
             logger.info(f"Best pick score {picks[0].score:.3f} below no-trade threshold "
@@ -134,6 +186,89 @@ class AlertEngine:
             return []
 
         picks = picks[:max_alerts]
+
+        # --- LLM VALIDATION ---
+        if picks and self.llm.client:
+            logger.info(f"Running LLM validation on {len(picks)} candidate(s)...")
+            validated = []
+            for pick in picks:
+                ud = universe_data.get(pick.symbol, {})
+                ohlcv = ud.get("ohlcv")
+                fund = ud.get("fundamentals", {})
+
+                indicators = {}
+                if ohlcv is not None and not ohlcv.empty:
+                    last = ohlcv.iloc[-1]
+                    indicators = {
+                        "rsi": round(last.get("rsi", 0), 1),
+                        "macd_hist": round(last.get("macd_hist", 0), 3),
+                        "adx": round(last.get("adx", 0), 1),
+                        "bb_pct": round(last.get("bb_pct", 0), 2),
+                        "volume_ratio": round(last.get("volume", 0) / ohlcv["volume"].tail(20).mean(), 1) if ohlcv["volume"].tail(20).mean() > 0 else 1.0,
+                        "ema_20": round(last.get("ema_20", 0), 2),
+                        "ema_50": round(last.get("ema_50", 0), 2),
+                        "ema_200": round(last.get("ema_200", 0), 2),
+                    }
+
+                pick_data = {
+                    "symbol": pick.symbol,
+                    "current_price": pick.entry_price,
+                    "entry": pick.entry_price,
+                    "target": pick.target_price,
+                    "stop_loss": pick.stop_loss,
+                    "signal": pick.action,
+                    **indicators,
+                    "confluence_score": "N/A",
+                    "max_confluence": 12,
+                    "factors": pick.technical_summary or "",
+                    "weekly_trend": "N/A",
+                    "rs_trend": "N/A",
+                    "strategy_signals": f"{pick.strategy}: score={pick.score:.3f}, R:R=1:{pick.risk_reward_ratio:.1f}\n{pick.reasoning}",
+                    "fundamentals": pick.fundamental_summary or f"P/E={fund.get('pe_ratio', '?')}, ROE={fund.get('roe', '?')}, D/E={fund.get('debt_to_equity', '?')}",
+                    "market_regime": regime_type,
+                    "fii_sentiment": fii_sentiment,
+                    "sector": fund.get("sector", ""),
+                    "sector_strength": "Strong" if fund.get("sector", "") in strong_sectors else "Weak" if fund.get("sector", "") in weak_sectors else "Neutral",
+                }
+
+                result = self.llm.validate_pick(pick_data)
+                verdict = result.get("verdict", "BUY")
+                confidence = result.get("confidence", 0.5)
+                reasoning = result.get("reasoning", "")
+
+                if verdict == "SKIP":
+                    logger.info(f"LLM SKIP {pick.symbol}: {reasoning}")
+                    continue
+
+                pick._llm_verdict = verdict
+                pick._llm_confidence = confidence
+                pick._llm_reasoning = reasoning
+                pick._llm_risk_flags = result.get("risk_flags", [])
+
+                if verdict == "STRONG_BUY" and confidence >= 0.7:
+                    pick.score = min(1.0, pick.score + 0.05)
+
+                validated.append(pick)
+                logger.info(f"LLM {verdict} {pick.symbol} (confidence={confidence:.0%}): {reasoning[:100]}")
+
+            picks = validated
+            if not picks:
+                logger.info("All candidates rejected by LLM. No alerts today.")
+                return []
+
+        # --- CHECK 9: Intraday entry refinement (15-min data) ---
+        intraday_filtered = []
+        for pick in picks:
+            intra = check_intraday_entry(pick.symbol, pick.entry_price)
+            if not intra["favorable"]:
+                logger.info(f"SKIP {pick.symbol}: intraday unfavorable — {intra['reason']}")
+                continue
+            if intra["adjusted_entry"] != pick.entry_price:
+                logger.info(f"ENTRY ADJ {pick.symbol}: {pick.entry_price:.2f} -> "
+                            f"{intra['adjusted_entry']:.2f} ({intra['reason']})")
+                pick.entry_price = intra["adjusted_entry"]
+            intraday_filtered.append(pick)
+        picks = intraday_filtered
 
         # --- POSITION SIZING ---
         streak = self.store.get_recent_streak()
@@ -153,6 +288,15 @@ class AlertEngine:
             fund = universe_data.get(pick.symbol, {}).get("fundamentals", {})
             raw_sector = fund.get("sector", "")
 
+            llm_reasoning = getattr(pick, "_llm_reasoning", "")
+            llm_verdict = getattr(pick, "_llm_verdict", "")
+            llm_flags = getattr(pick, "_llm_risk_flags", [])
+            full_reasoning = pick.reasoning
+            if llm_reasoning:
+                full_reasoning += f"\n\nLLM ({llm_verdict}): {llm_reasoning}"
+                if llm_flags:
+                    full_reasoning += f"\nRisk flags: {', '.join(llm_flags)}"
+
             alert = {
                 "date": today,
                 "symbol": pick.symbol,
@@ -162,7 +306,7 @@ class AlertEngine:
                 "target_price": pick.target_price,
                 "stop_loss": pick.stop_loss,
                 "signal_score": round(pick.score, 3),
-                "reasoning": pick.reasoning,
+                "reasoning": full_reasoning,
                 "technical_summary": pick.technical_summary,
                 "fundamental_summary": pick.fundamental_summary,
                 "risk_reward_ratio": pick.risk_reward_ratio,
@@ -200,10 +344,14 @@ class AlertEngine:
         regime = get_market_regime()
         flows = get_fii_dii_activity()
         market_status = is_market_open_today()
+        global_ctx = get_global_context()
+        breadth = get_market_breadth()
         return {
             "market_open": market_status,
             "regime": regime,
             "fii_dii": flows,
+            "global_context": global_ctx,
+            "breadth": breadth,
         }
 
     def check_and_close_alerts(self):
@@ -240,6 +388,8 @@ class AlertEngine:
             if day_high > highest_price:
                 highest_price = day_high
 
+            partial_booked = bool(alert.get("partial_booked"))
+
             if tsl_enabled and original_stop and entry_price:
                 risk_per_share = entry_price - original_stop
                 if risk_per_share > 0:
@@ -253,6 +403,15 @@ class AlertEngine:
                                 f"TRAIL: {symbol} highest={highest_price:.2f} "
                                 f"trailing SL raised to Rs.{trailing_stop:.2f} "
                                 f"({r_multiple:.1f}R profit)"
+                            )
+
+                        if not partial_booked and r_multiple >= tsl_activate_rr:
+                            self.store.mark_partial_booked(alert["id"], current_price)
+                            partial_booked = True
+                            partial_pnl = ((current_price - entry_price) / entry_price) * 100
+                            logger.info(
+                                f"PARTIAL BOOK: {symbol} booked 50% @ Rs.{current_price:.2f} "
+                                f"({partial_pnl:+.2f}%, {r_multiple:.1f}R). Trailing rest."
                             )
 
             self.store.update_trailing_stop(alert["id"], trailing_stop, highest_price)

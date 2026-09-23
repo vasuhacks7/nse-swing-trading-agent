@@ -51,6 +51,42 @@ strategies:
     pullback_to_ema: true
     weight: 1.0
 
+  volatility_contraction:
+    enabled: true
+    bb_width_pctile_max: 0.15
+    weight: 1.0
+
+  52_week_high:
+    enabled: true
+    max_pct_from_high: -10
+    min_pct_from_high: -2
+    weight: 1.0
+
+  relative_strength:
+    enabled: true
+    min_return_3m: 15
+    min_return_6m: 25
+    weight: 1.0
+
+  inside_bar_breakout:
+    enabled: true
+    weight: 1.0
+
+  gap_and_go:
+    enabled: true
+    min_gap_pct: 2.0
+    min_vol_ratio: 1.5
+    weight: 1.0
+
+  bollinger_squeeze:
+    enabled: true
+    squeeze_pctile: 0.10
+    weight: 1.0
+
+  vwap_bounce:
+    enabled: true
+    weight: 1.0
+
 alerts:
   max_daily_alerts: 2
   min_signal_score: 0.65

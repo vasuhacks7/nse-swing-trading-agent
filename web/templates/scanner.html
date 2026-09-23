@@ -35,6 +35,7 @@
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Weekly</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">RS</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Strategies</th>
+                <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">AI Verdict</th>
                 <th style="padding: 10px 12px; color: #9ca3af; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Factors</th>
             </tr>
         </thead>
@@ -178,7 +179,7 @@ function filterResults() {
 function renderResults(results) {
     var tbody = document.getElementById('resultsBody');
     if (!results.length) {
-        tbody.innerHTML = '<tr><td colspan="12" style="padding: 30px; text-align: center; color: #6b7280;">No stocks match this filter</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="padding: 30px; text-align: center; color: #6b7280;">No stocks match this filter</td></tr>';
         document.getElementById('resultsTable').style.display = 'block';
         return;
     }
@@ -212,6 +213,13 @@ function renderResults(results) {
             '<td style="padding: 10px 12px; color:' + weeklyColor + '; font-size: 11px; font-weight: 700;">' + (r.weekly_trend || '—') + '</td>' +
             '<td style="padding: 10px 12px; color:' + rsColor + '; font-size: 11px; font-weight: 700;">' + (r.rs_trend || '—') + '</td>' +
             '<td style="padding: 10px 12px; font-size: 11px; max-width: 180px;">' + (r.strategies && r.strategies.length ? r.strategies.map(function(s) { return '<span style="background: #3b82f622; color: #3b82f6; padding: 2px 6px; border-radius: 3px; font-weight: 600; margin-right: 3px; display: inline-block; margin-bottom: 2px;">' + s + '</span>'; }).join('') : '<span style="color: #4b5563;">—</span>') + '</td>' +
+            '<td style="padding: 10px 12px; font-size: 11px;">' + (function() {
+                if (!r.llm_verdict) return '<span style="color: #4b5563;">—</span>';
+                var vc = r.llm_verdict === 'STRONG_BUY' ? '#22c55e' : r.llm_verdict === 'BUY' ? '#3b82f6' : '#ef4444';
+                var conf = r.llm_confidence ? Math.round(r.llm_confidence * 100) + '%' : '';
+                var tip = r.llm_reasoning ? r.llm_reasoning.replace(/"/g, '&quot;') : '';
+                return '<span title="' + tip + '" style="background:' + vc + '22; color:' + vc + '; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 10px; cursor: help;">' + r.llm_verdict.replace('_', ' ') + '</span>' + (conf ? '<div style="color: #6b7280; font-size: 10px; margin-top: 2px;">' + conf + ' conf</div>' : '');
+            })() + '</td>' +
             '<td style="padding: 10px 12px; color: #9ca3af; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + (r.factors || '') + '</td>' +
             '</tr>';
     }).join('');

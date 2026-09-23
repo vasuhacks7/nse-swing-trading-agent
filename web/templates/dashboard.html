@@ -27,6 +27,27 @@
     </span>
 </div>
 
+<!-- Global Context & Breadth Bar -->
+{% if global_ctx or breadth %}
+<div class="regime-bar" style="margin-top: 4px; font-size: 12px; opacity: 0.9;">
+    {% if global_ctx %}
+    {% set gs = global_ctx.get('overall_sentiment', 'NEUTRAL') %}
+    <span class="tag {% if gs == 'BEARISH' %}bearish{% elif gs == 'BULLISH' %}bullish{% else %}sideways{% endif %}" style="font-size: 10px;">GLOBAL: {{ gs }}</span>
+    {% for name, d in global_ctx.get('details', {}).items() %}
+    <span class="item">{{ name|replace('_', ' ')|title }} <strong>{% if d.get('change_pct') is not none %}{{ "%+.1f"|format(d.change_pct) }}%{% else %}{{ d.get('last', '—') }}{% endif %}</strong></span>
+    {% endfor %}
+    {% endif %}
+    {% if breadth %}
+    <span class="sep">&bull;</span>
+    {% set bs = breadth.get('breadth_signal', 'NEUTRAL') %}
+    <span class="tag {% if 'BEAR' in bs or 'WEAK' in bs %}bearish{% elif 'BULL' in bs %}bullish{% else %}sideways{% endif %}" style="font-size: 10px;">BREADTH: {{ bs }}</span>
+    <span class="item">>200EMA <strong>{{ breadth.get('above_200ema_pct', 0) }}%</strong></span>
+    <span class="item">A/D <strong>{{ breadth.get('ad_ratio', '—') }}</strong></span>
+    <span class="item">Highs <strong>{{ breadth.get('new_20d_highs', 0) }}</strong> / Lows <strong>{{ breadth.get('new_20d_lows', 0) }}</strong></span>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Performance Metrics -->
 {% if perf.get('total_trades', 0) > 0 %}
 <div class="metrics">
@@ -130,7 +151,7 @@
     {% else %}
         <div class="empty-state">
             <div class="icon">📊</div>
-            <p>No alerts generated today.<br>Click <strong>Generate Alerts</strong> to scan the market.</p>
+            <p>No alerts generated today.<br>Alerts are generated automatically before market opens at 9:15 AM IST.</p>
         </div>
     {% endif %}
 </div>

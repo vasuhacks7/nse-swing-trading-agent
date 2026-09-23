@@ -89,6 +89,66 @@ class LLMAdvisor:
         else:
             logger.warning("No LLM backend configured (set AWS_REGION or ANTHROPIC_API_KEY)")
 
+    def validate_pick(self, pick_data: dict) -> dict:
+        if not self.client:
+            return {"verdict": pick_data.get("signal", "BUY"), "confidence": 0.5, "reasoning": "LLM not configured", "skip": False}
+
+        prompt = f"""You are a senior swing trader reviewing an NSE stock pick. Analyze this candidate and decide if it's worth trading.
+
+## Stock: {pick_data.get('symbol', '?')}
+- Current Price: Rs.{pick_data.get('current_price', 0):.2f}
+- Entry: Rs.{pick_data.get('entry', 0):.2f} | Target: Rs.{pick_data.get('target', 0):.2f} | Stop Loss: Rs.{pick_data.get('stop_loss', 0):.2f}
+- Signal: {pick_data.get('signal', '?')}
+
+## Technical Analysis
+- RSI: {pick_data.get('rsi', '?')} | MACD Hist: {pick_data.get('macd_hist', '?')} | ADX: {pick_data.get('adx', '?')}
+- Bollinger %B: {pick_data.get('bb_pct', '?')} | Volume Ratio: {pick_data.get('volume_ratio', '?')}
+- EMA 20: {pick_data.get('ema_20', '?')} | EMA 50: {pick_data.get('ema_50', '?')} | EMA 200: {pick_data.get('ema_200', '?')}
+
+## Confluence Analysis
+- Confluence Score: {pick_data.get('confluence_score', '?')}/{pick_data.get('max_confluence', 12)}
+- Factors: {pick_data.get('factors', '?')}
+- Weekly Trend: {pick_data.get('weekly_trend', '?')} | Relative Strength: {pick_data.get('rs_trend', '?')}
+
+## Strategy Signals
+{pick_data.get('strategy_signals', 'None')}
+
+## Fundamentals
+{pick_data.get('fundamentals', 'Not available')}
+
+## Market Context
+- Regime: {pick_data.get('market_regime', '?')} | FII Sentiment: {pick_data.get('fii_sentiment', '?')}
+- Sector: {pick_data.get('sector', '?')} | Sector Strength: {pick_data.get('sector_strength', '?')}
+
+Respond with JSON only:
+{{
+    "verdict": "STRONG_BUY" or "BUY" or "SKIP",
+    "confidence": 0.0 to 1.0,
+    "reasoning": "2-3 sentence explanation",
+    "risk_flags": ["any red flags"],
+    "adjusted_target": null or price if you think target should change,
+    "adjusted_stop": null or price if you think stop should change
+}}"""
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            result = json.loads(text)
+            result.setdefault("verdict", "BUY")
+            result.setdefault("confidence", 0.5)
+            result.setdefault("reasoning", "")
+            result.setdefault("risk_flags", [])
+            return result
+        except Exception as e:
+            logger.error(f"LLM pick validation failed for {pick_data.get('symbol', '?')}: {e}")
+            return {"verdict": pick_data.get("signal", "BUY"), "confidence": 0.5, "reasoning": f"LLM error: {e}", "risk_flags": [], "skip": False}
+
     def analyze_performance(self, performance_text: str, strategy_scores: dict) -> dict:
         if not self.client:
             return {"error": "LLM not configured"}

@@ -59,4 +59,30 @@ class Preprocessor:
 
         df["gap_pct"] = (df["open"] - df["close"].shift(1)) / df["close"].shift(1) * 100
 
+        bb_width = (df["bb_upper"] - df["bb_lower"])
+        bb_mid = df["bb_middle"]
+        df["bb_width"] = bb_width / bb_mid.where(bb_mid > 0, 1)
+        df["bb_width_pctile"] = df["bb_width"].rolling(120, min_periods=30).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+
+        daily_range = df["high"] - df["low"]
+        df["nr7"] = daily_range == daily_range.rolling(7).min()
+        df["nr4"] = daily_range == daily_range.rolling(4).min()
+
+        df["inside_bar"] = (df["high"] < df["high"].shift(1)) & (df["low"] > df["low"].shift(1))
+
+        df["tight_range"] = df["atr"] / df["close"].where(df["close"] > 0, 1) < 0.015
+
+        df["return_1m"] = df["close"].pct_change(20) * 100
+        df["return_3m"] = df["close"].pct_change(63) * 100
+        df["return_6m"] = df["close"].pct_change(126) * 100
+
+        df["high_52w"] = df["high"].rolling(252, min_periods=60).max()
+        df["pct_from_high_52w"] = (df["close"] / df["high_52w"] - 1) * 100
+
+        df["vol_contraction"] = df["volume_ratio"] < 0.7
+        df["vol_expansion"] = df["volume_ratio"] > 1.5
+        df["vol_dry_up"] = df["volume_ratio"].rolling(5).mean() < 0.6
+
         return df
